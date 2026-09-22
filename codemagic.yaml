@@ -52,6 +52,10 @@ workflows:
             "$RES/drawable" \
             "$RES/values"
 
+          rm -f "$RES/mipmap-mdpi/ic_launcher.xml" "$RES/mipmap-mdpi/ic_launcher_round.xml"
+          rm -f "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
+          rm -f "$RES/drawable/ic_launcher_foreground.xml"
+
           magick "$SRC" \
             -background none \
             -alpha on \
@@ -152,6 +156,8 @@ workflows:
           test -f "$SRC"
 
           mkdir -p "$(dirname "$OUT")"
+
+          rm -f "$MODULE_PATH/res/drawable/splash_icon.xml"
 
           magick "$SRC" \
             -background none \

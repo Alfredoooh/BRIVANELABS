@@ -1,29 +1,282 @@
 workflows:
   brivane-notes-android:
-    name: Brivane Notes — Android Release
-    max_build_duration: 30
-    instance_type: linux_x2
+    name: Brivane Notes Android
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+
     environment:
       android_signing:
-        - brivane_notes_release
+        - brivane-notes-release
+
       vars:
         PACKAGE_NAME: "com.brivanelabs.notes"
         MODULE_PATH: "app/src/main"
-      java: 17
 
     scripts:
-      - name: Set Android SDK location
-        script: echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
-
-      - name: Generate release artifacts
+      - name: Instalar ferramentas
         script: |
           set -e
+
+          brew install imagemagick || true
+          brew install curl || true
+
+      - name: Verificar projeto
+        script: |
+          set -e
+
+          test -f "settings.gradle.kts"
+          test -f "build.gradle.kts"
+          test -f "app/build.gradle.kts"
+          test -f "$MODULE_PATH/AndroidManifest.xml"
+          test -f "$MODULE_PATH/java/com/brivanelabs/notes/MainActivity.kt"
+          test -f "$MODULE_PATH/assets/index.html"
+          test -f "./gradlew"
+
+          echo "✔ Estrutura do projeto OK."
+
+      - name: Gerar ic_launcher
+        script: |
+          set -e
+
+          SRC="ic_launcher.png"
+          RES="$MODULE_PATH/res"
+
+          test -f "$SRC"
+
+          mkdir -p \
+            "$RES/mipmap-mdpi" \
+            "$RES/mipmap-hdpi" \
+            "$RES/mipmap-xhdpi" \
+            "$RES/mipmap-xxhdpi" \
+            "$RES/mipmap-xxxhdpi" \
+            "$RES/mipmap-anydpi-v26" \
+            "$RES/drawable" \
+            "$RES/values"
+
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize 48x48 \
+            -gravity center \
+            -extent 48x48 \
+            -strip \
+            "$RES/mipmap-mdpi/ic_launcher.png"
+
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize 72x72 \
+            -gravity center \
+            -extent 72x72 \
+            -strip \
+            "$RES/mipmap-hdpi/ic_launcher.png"
+
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize 96x96 \
+            -gravity center \
+            -extent 96x96 \
+            -strip \
+            "$RES/mipmap-xhdpi/ic_launcher.png"
+
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize 144x144 \
+            -gravity center \
+            -extent 144x144 \
+            -strip \
+            "$RES/mipmap-xxhdpi/ic_launcher.png"
+
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize 192x192 \
+            -gravity center \
+            -extent 192x192 \
+            -strip \
+            "$RES/mipmap-xxxhdpi/ic_launcher.png"
+
+          cp "$RES/mipmap-mdpi/ic_launcher.png" \
+             "$RES/mipmap-mdpi/ic_launcher_round.png"
+
+          cp "$RES/mipmap-hdpi/ic_launcher.png" \
+             "$RES/mipmap-hdpi/ic_launcher_round.png"
+
+          cp "$RES/mipmap-xhdpi/ic_launcher.png" \
+             "$RES/mipmap-xhdpi/ic_launcher_round.png"
+
+          cp "$RES/mipmap-xxhdpi/ic_launcher.png" \
+             "$RES/mipmap-xxhdpi/ic_launcher_round.png"
+
+          cp "$RES/mipmap-xxxhdpi/ic_launcher.png" \
+             "$RES/mipmap-xxxhdpi/ic_launcher_round.png"
+
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize 432x432 \
+            -gravity center \
+            -extent 432x432 \
+            -strip \
+            "$RES/drawable/ic_launcher_foreground.png"
+
+          cat > "$RES/values/ic_launcher_background.xml" <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="ic_launcher_background">#FFFFFF</color>
+          </resources>
+          EOF
+
+          cat > "$RES/mipmap-anydpi-v26/ic_launcher.xml" <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
+          cp \
+            "$RES/mipmap-anydpi-v26/ic_launcher.xml" \
+            "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
+
+          echo "✔ Launcher criado."
+
+      - name: Gerar splash transparente
+        script: |
+          set -e
+
+          SRC="splash_icon.png"
+          OUT="$MODULE_PATH/res/drawable/splash_icon.png"
+
+          test -f "$SRC"
+
+          mkdir -p "$(dirname "$OUT")"
+
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize 480x480 \
+            -gravity center \
+            -extent 480x480 \
+            -strip \
+            "$OUT"
+
+          echo "✔ Splash transparente criado."
+
+      - name: Configurar fundo do splash
+        script: |
+          set -e
+
+          mkdir -p \
+            "$MODULE_PATH/res/values" \
+            "$MODULE_PATH/res/values-night"
+
+          cat > "$MODULE_PATH/res/values/colors.xml" <<'EOF'
+          <resources>
+              <color name="splash_background">#FFFFFF</color>
+          </resources>
+          EOF
+
+          cat > "$MODULE_PATH/res/values-night/colors.xml" <<'EOF'
+          <resources>
+              <color name="splash_background">#0D0D0D</color>
+          </resources>
+          EOF
+
+      - name: Baixar somente os Ionicons usados
+        script: |
+          set -e
+
+          HTML="$MODULE_PATH/assets/index.html"
+          OUT="$MODULE_PATH/assets/icons"
+          BASE="https://raw.githubusercontent.com/ionic-team/ionicons/main/src/svg"
+
+          test -f "$HTML"
+
+          mkdir -p "$OUT"
+          : > /tmp/brivane-icons.txt
+
+          grep -oE '<ion-icon[^>]*name="[^"]+"' "$HTML" \
+            | grep -oE 'name="[^"]+"' \
+            | sed -E 's/name="([^"]+)"/\1/' \
+            >> /tmp/brivane-icons.txt || true
+
+          grep -oE "<ion-icon[^>]*name='[^']+'" "$HTML" \
+            | grep -oE "name='[^']+'" \
+            | sed -E "s/name='([^']+)'/\1/" \
+            >> /tmp/brivane-icons.txt || true
+
+          sort -u \
+            /tmp/brivane-icons.txt \
+            -o /tmp/brivane-icons.txt
+
+          while IFS= read -r icon; do
+            [ -z "$icon" ] && continue
+
+            curl -fsSL \
+              "$BASE/$icon.svg" \
+              -o "$OUT/$icon.svg" \
+              || rm -f "$OUT/$icon.svg"
+
+          done < /tmp/brivane-icons.txt
+
+          echo "✔ Ionicons processados."
+
+      - name: Preparar Gradle
+        script: |
+          set -e
+
           chmod +x ./gradlew
-          ./gradlew assembleRelease --no-daemon
+
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
+          ./gradlew --version
+
+      - name: Build APK Release
+        script: |
+          set -e
+
+          ./gradlew \
+            clean \
+            assembleRelease \
+            --no-daemon \
+            --stacktrace
+
+      - name: Build AAB Release
+        script: |
+          set -e
+
+          ./gradlew \
+            bundleRelease \
+            --no-daemon \
+            --stacktrace
+
+      - name: Verificar artefatos
+        script: |
+          set -e
+
+          echo "== APK =="
+          find app/build/outputs/apk/release \
+            -type f \
+            -name "*.apk" \
+            -print
+
+          echo "== AAB =="
+          find app/build/outputs/bundle/release \
+            -type f \
+            -name "*.aab" \
+            -print
 
     artifacts:
       - app/build/outputs/apk/release/*.apk
+      - app/build/outputs/bundle/release/*.aab
 
     publishing:
-      email: alfredopjonas@gmail.com
-        recipients: []
+      email:
+        recipients:
+          - alfredopjonas@gmail.com
+        notify:
+          success: true
+          failure: true

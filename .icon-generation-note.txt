@@ -1,0 +1,4 @@
+Opcional na raiz do repositório:
+- ic_launcher.png
+- splash_icon.png
+O codemagic.yaml pode ser expandido com a etapa ImageMagick para gerar todas as densidades.

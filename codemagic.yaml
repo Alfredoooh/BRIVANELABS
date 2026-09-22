@@ -1,0 +1,29 @@
+workflows:
+  brivane-notes-android:
+    name: Brivane Notes — Android Release
+    max_build_duration: 30
+    instance_type: linux_x2
+    environment:
+      android_signing:
+        - brivane_notes_release
+      vars:
+        PACKAGE_NAME: "com.brivanelabs.notes"
+        MODULE_PATH: "app/src/main"
+      java: 17
+
+    scripts:
+      - name: Set Android SDK location
+        script: echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
+
+      - name: Generate release artifacts
+        script: |
+          set -e
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon
+
+    artifacts:
+      - app/build/outputs/apk/release/*.apk
+
+    publishing:
+      email:
+        recipients: []

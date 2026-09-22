@@ -25,5 +25,5 @@ workflows:
       - app/build/outputs/apk/release/*.apk
 
     publishing:
-      email:
+      email: alfredopjonas@gmail.com
         recipients: []

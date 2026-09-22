@@ -5,9 +5,6 @@ workflows:
     instance_type: mac_mini_m2
 
     environment:
-      android_signing:
-        - brivane-release
-
       vars:
         PACKAGE_NAME: "com.brivanelabs.notes"
         MODULE_PATH: "app/src/main"
@@ -31,6 +28,8 @@ workflows:
           test -f "$MODULE_PATH/java/com/brivanelabs/notes/MainActivity.kt"
           test -f "$MODULE_PATH/assets/index.html"
           test -f "./gradlew"
+          test -f "keystore/brivane-release.jks"
+          test -f "keystore/key.properties"
 
           echo "✔ Estrutura do projeto OK."
 

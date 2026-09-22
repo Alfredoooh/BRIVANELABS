@@ -188,28 +188,57 @@ workflows:
         script: |
           set -e
 
-          HTML="$MODULE_PATH/assets/index.html"
           OUT="$MODULE_PATH/assets/icons"
           BASE="https://raw.githubusercontent.com/ionic-team/ionicons/main/src/svg"
 
-          test -f "$HTML"
-
           mkdir -p "$OUT"
-          : > /tmp/brivane-icons.txt
 
-          grep -oE '<ion-icon[^>]*name="[^"]+"' "$HTML" \
-            | grep -oE 'name="[^"]+"' \
-            | sed -E 's/name="([^"]+)"/\1/' \
-            >> /tmp/brivane-icons.txt || true
-
-          grep -oE "<ion-icon[^>]*name='[^']+'" "$HTML" \
-            | grep -oE "name='[^']+'" \
-            | sed -E "s/name='([^']+)'/\1/" \
-            >> /tmp/brivane-icons.txt || true
-
-          sort -u \
-            /tmp/brivane-icons.txt \
-            -o /tmp/brivane-icons.txt
+          cat > /tmp/brivane-icons.txt <<'EOF'
+          add
+          apps-outline
+          archive-outline
+          arrow-back
+          arrow-redo-outline
+          arrow-undo-outline
+          ban-outline
+          brush-outline
+          calendar-outline
+          checkbox-outline
+          checkmark
+          checkmark-circle-outline
+          checkmark-done-outline
+          chevron-forward
+          close
+          color-fill-outline
+          color-palette-outline
+          document-text
+          document-text-outline
+          ellipse
+          ellipsis-horizontal
+          ellipsis-vertical
+          folder
+          folder-open-outline
+          folder-outline
+          image-outline
+          information-circle-outline
+          list
+          list-outline
+          moon
+          notifications
+          notifications-outline
+          pin
+          pin-outline
+          pricetag
+          pricetag-outline
+          search
+          search-outline
+          settings-outline
+          swap-vertical-outline
+          text
+          time-outline
+          trash-bin-outline
+          trash-outline
+          EOF
 
           while IFS= read -r icon; do
             [ -z "$icon" ] && continue

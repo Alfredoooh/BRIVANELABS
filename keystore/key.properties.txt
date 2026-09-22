@@ -1,4 +1,0 @@
-storeFile=keystore/brivane-release.jks
-storePassword=Brv!CDFnUKzlLc3AWpwz3mMfXOlwzMCh
-keyAlias=brivane
-keyPassword=Brv!8FlbVnhBqNUfozGofReqK38Ath4E

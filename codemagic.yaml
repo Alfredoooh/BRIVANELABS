@@ -6,7 +6,7 @@ workflows:
 
     environment:
       android_signing:
-        - brivane-notes-release
+        - brivane-release
 
       vars:
         PACKAGE_NAME: "com.brivanelabs.notes"

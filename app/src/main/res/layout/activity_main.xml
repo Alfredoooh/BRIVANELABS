@@ -1,12 +1,14 @@
-<!-- app/src/main/res/layout/activity_main.xml -->
 <?xml version="1.0" encoding="utf-8"?>
+<!-- app/src/main/res/layout/activity_main.xml -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
+
     <WebView
         android:id="@+id/webView"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
     <Button
         android:id="@+id/reloadBtn"
         android:layout_width="wrap_content"
@@ -15,4 +17,5 @@
         android:text="Recarregar"
         android:textAllCaps="false"
         android:visibility="gone" />
+
 </FrameLayout>

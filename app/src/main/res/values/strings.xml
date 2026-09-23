@@ -1,1 +1,4 @@
-<resources><string name="app_name">Brivane Notes</string></resources>
+<resources>
+  <string name="app_name">Brivane Notes</string>
+  <string name="unlock_note_title">Desbloquear nota</string>
+</resources>

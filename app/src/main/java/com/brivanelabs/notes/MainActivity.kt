@@ -5,10 +5,12 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.view.View
 import android.webkit.ConsoleMessage
+import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -17,10 +19,16 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import com.brivanelabs.notes.bridge.NotesBridge
 
 class MainActivity : AppCompatActivity() {
@@ -29,11 +37,32 @@ class MainActivity : AppCompatActivity() {
     private val appIndexUrl = "file:///android_asset/index.html"
     private var loadFailed = false
     private var pendingOpenNoteId: String? = null
+    private var pendingBiometricNoteId: String? = null
+
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        fileChooserLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val callback = filePathCallback
+            filePathCallback = null
+            if (callback == null) return@registerForActivityResult
+            val data = result.data
+            val uris: Array<Uri>? = when {
+                result.resultCode != RESULT_OK -> null
+                data?.clipData != null -> {
+                    val clip = data.clipData!!
+                    Array(clip.itemCount) { i -> clip.getItemAt(i).uri }
+                }
+                data?.data != null -> arrayOf(data.data!!)
+                else -> null
+            }
+            callback.onReceiveValue(uris)
+        }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
@@ -42,7 +71,15 @@ class MainActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.webView)
         reloadBtn = findViewById(R.id.reloadBtn)
-        ViewCompat.setOnApplyWindowInsetsListener(webView) { _, insets -> insets }
+
+        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            val bottom = maxOf(bars.bottom, ime.bottom)
+            view.setPadding(0, 0, 0, 0)
+            applyKeyboardInsetToWebView(bottom)
+            WindowInsetsCompat.CONSUMED
+        }
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -66,6 +103,25 @@ class MainActivity : AppCompatActivity() {
             override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                 Log.d("BrivaneWeb", "${message.message()} (${message.sourceId()}:${message.lineNumber()})")
                 return true
+            }
+
+            override fun onShowFileChooser(
+                view: WebView,
+                callback: ValueCallback<Array<Uri>>,
+                params: FileChooserParams
+            ): Boolean {
+                filePathCallback?.onReceiveValue(null)
+                filePathCallback = callback
+                val intent = params.createIntent().apply {
+                    if (type == null) type = "image/*"
+                }
+                return try {
+                    fileChooserLauncher.launch(intent)
+                    true
+                } catch (e: Exception) {
+                    filePathCallback = null
+                    false
+                }
             }
         }
 
@@ -129,11 +185,61 @@ class MainActivity : AppCompatActivity() {
         if (::webView.isInitialized && webView.progress == 100) NotesBridge.openNoteInWebView(webView, noteId) else pendingOpenNoteId = noteId
     }
 
+    private fun applyKeyboardInsetToWebView(bottomPx: Int) {
+        if (!::webView.isInitialized) return
+        val density = resources.displayMetrics.density
+        val bottomDp = (bottomPx / density)
+        val js = "document.documentElement.style.setProperty('--android-kb', '${bottomDp}px'); " +
+            "if (typeof updateKeyboard === 'function') updateKeyboard();"
+        webView.post { webView.evaluateJavascript(js, null) }
+    }
+
+    fun setStatusBarLight(lightIcons: Boolean) {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = lightIcons
+        controller.isAppearanceLightNavigationBars = lightIcons
+    }
+
     private fun applyStatusBarForTheme() {
         val isDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        val controller = WindowCompat.getInsetsController(window, window.decorView)
-        controller.isAppearanceLightStatusBars = !isDark
-        controller.isAppearanceLightNavigationBars = !isDark
+        setStatusBarLight(!isDark)
+    }
+
+    // ── Biometria ──
+
+    fun isBiometricAvailable(): Boolean {
+        val manager = BiometricManager.from(this)
+        return manager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL) == BiometricManager.BIOMETRIC_SUCCESS
+    }
+
+    fun requestBiometricUnlock(noteId: String) {
+        if (!isBiometricAvailable()) {
+            NotesBridge.notifyBiometricResult(webView, noteId, false)
+            return
+        }
+        pendingBiometricNoteId = noteId
+        val executor = ContextCompat.getMainExecutor(this)
+        val callback = object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                super.onAuthenticationSucceeded(result)
+                NotesBridge.notifyBiometricResult(webView, noteId, true)
+                pendingBiometricNoteId = null
+            }
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                super.onAuthenticationError(errorCode, errString)
+                NotesBridge.notifyBiometricResult(webView, noteId, false)
+                pendingBiometricNoteId = null
+            }
+            override fun onAuthenticationFailed() {
+                super.onAuthenticationFailed()
+            }
+        }
+        val prompt = BiometricPrompt(this, executor, callback)
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle(getString(R.string.unlock_note_title))
+            .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
+            .build()
+        prompt.authenticate(promptInfo)
     }
 
     override fun onPause() { super.onPause(); webView.onPause(); webView.pauseTimers() }

@@ -1,3 +1,4 @@
+# codemagic.yaml
 workflows:
   brivane-notes-android:
     name: Brivane Notes Android
@@ -13,14 +14,12 @@ workflows:
       - name: Instalar ferramentas
         script: |
           set -e
-
           brew install imagemagick || true
           brew install curl || true
 
       - name: Verificar projeto
         script: |
           set -e
-
           test -f "settings.gradle.kts"
           test -f "build.gradle.kts"
           test -f "app/build.gradle.kts"
@@ -30,108 +29,35 @@ workflows:
           test -f "./gradlew"
           test -f "keystore/brivane-release.jks"
           test -f "keystore/key.properties"
-
           echo "✔ Estrutura do projeto OK."
 
       - name: Gerar ic_launcher
         script: |
           set -e
-
           SRC="ic_launcher.png"
           RES="$MODULE_PATH/res"
-
           test -f "$SRC"
-
-          mkdir -p \
-            "$RES/mipmap-mdpi" \
-            "$RES/mipmap-hdpi" \
-            "$RES/mipmap-xhdpi" \
-            "$RES/mipmap-xxhdpi" \
-            "$RES/mipmap-xxxhdpi" \
-            "$RES/mipmap-anydpi-v26" \
-            "$RES/drawable" \
-            "$RES/values"
-
+          mkdir -p "$RES/mipmap-mdpi" "$RES/mipmap-hdpi" "$RES/mipmap-xhdpi" "$RES/mipmap-xxhdpi" "$RES/mipmap-xxxhdpi" "$RES/mipmap-anydpi-v26" "$RES/drawable" "$RES/values"
           rm -f "$RES/mipmap-mdpi/ic_launcher.xml" "$RES/mipmap-mdpi/ic_launcher_round.xml"
           rm -f "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
           rm -f "$RES/drawable/ic_launcher_foreground.xml"
-
-          magick "$SRC" \
-            -background none \
-            -alpha on \
-            -resize 48x48 \
-            -gravity center \
-            -extent 48x48 \
-            -strip \
-            "$RES/mipmap-mdpi/ic_launcher.png"
-
-          magick "$SRC" \
-            -background none \
-            -alpha on \
-            -resize 72x72 \
-            -gravity center \
-            -extent 72x72 \
-            -strip \
-            "$RES/mipmap-hdpi/ic_launcher.png"
-
-          magick "$SRC" \
-            -background none \
-            -alpha on \
-            -resize 96x96 \
-            -gravity center \
-            -extent 96x96 \
-            -strip \
-            "$RES/mipmap-xhdpi/ic_launcher.png"
-
-          magick "$SRC" \
-            -background none \
-            -alpha on \
-            -resize 144x144 \
-            -gravity center \
-            -extent 144x144 \
-            -strip \
-            "$RES/mipmap-xxhdpi/ic_launcher.png"
-
-          magick "$SRC" \
-            -background none \
-            -alpha on \
-            -resize 192x192 \
-            -gravity center \
-            -extent 192x192 \
-            -strip \
-            "$RES/mipmap-xxxhdpi/ic_launcher.png"
-
-          cp "$RES/mipmap-mdpi/ic_launcher.png" \
-             "$RES/mipmap-mdpi/ic_launcher_round.png"
-
-          cp "$RES/mipmap-hdpi/ic_launcher.png" \
-             "$RES/mipmap-hdpi/ic_launcher_round.png"
-
-          cp "$RES/mipmap-xhdpi/ic_launcher.png" \
-             "$RES/mipmap-xhdpi/ic_launcher_round.png"
-
-          cp "$RES/mipmap-xxhdpi/ic_launcher.png" \
-             "$RES/mipmap-xxhdpi/ic_launcher_round.png"
-
-          cp "$RES/mipmap-xxxhdpi/ic_launcher.png" \
-             "$RES/mipmap-xxxhdpi/ic_launcher_round.png"
-
-          magick "$SRC" \
-            -background none \
-            -alpha on \
-            -resize 432x432 \
-            -gravity center \
-            -extent 432x432 \
-            -strip \
-            "$RES/drawable/ic_launcher_foreground.png"
-
+          magick "$SRC" -background none -alpha on -resize 48x48 -gravity center -extent 48x48 -strip "$RES/mipmap-mdpi/ic_launcher.png"
+          magick "$SRC" -background none -alpha on -resize 72x72 -gravity center -extent 72x72 -strip "$RES/mipmap-hdpi/ic_launcher.png"
+          magick "$SRC" -background none -alpha on -resize 96x96 -gravity center -extent 96x96 -strip "$RES/mipmap-xhdpi/ic_launcher.png"
+          magick "$SRC" -background none -alpha on -resize 144x144 -gravity center -extent 144x144 -strip "$RES/mipmap-xxhdpi/ic_launcher.png"
+          magick "$SRC" -background none -alpha on -resize 192x192 -gravity center -extent 192x192 -strip "$RES/mipmap-xxxhdpi/ic_launcher.png"
+          cp "$RES/mipmap-mdpi/ic_launcher.png" "$RES/mipmap-mdpi/ic_launcher_round.png"
+          cp "$RES/mipmap-hdpi/ic_launcher.png" "$RES/mipmap-hdpi/ic_launcher_round.png"
+          cp "$RES/mipmap-xhdpi/ic_launcher.png" "$RES/mipmap-xhdpi/ic_launcher_round.png"
+          cp "$RES/mipmap-xxhdpi/ic_launcher.png" "$RES/mipmap-xxhdpi/ic_launcher_round.png"
+          cp "$RES/mipmap-xxxhdpi/ic_launcher.png" "$RES/mipmap-xxxhdpi/ic_launcher_round.png"
+          magick "$SRC" -background none -alpha on -resize 432x432 -gravity center -extent 432x432 -strip "$RES/drawable/ic_launcher_foreground.png"
           cat > "$RES/values/ic_launcher_background.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <color name="ic_launcher_background">#FFFFFF</color>
           </resources>
           EOF
-
           cat > "$RES/mipmap-anydpi-v26/ic_launcher.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
@@ -139,169 +65,182 @@ workflows:
               <foreground android:drawable="@drawable/ic_launcher_foreground" />
           </adaptive-icon>
           EOF
-
-          cp \
-            "$RES/mipmap-anydpi-v26/ic_launcher.xml" \
-            "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
-
+          cp "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
           echo "✔ Launcher criado."
 
       - name: Gerar splash transparente
         script: |
           set -e
-
           SRC="splash_icon.png"
           OUT="$MODULE_PATH/res/drawable/splash_icon.png"
-
           test -f "$SRC"
-
           mkdir -p "$(dirname "$OUT")"
-
           rm -f "$MODULE_PATH/res/drawable/splash_icon.xml"
-
-          magick "$SRC" \
-            -background none \
-            -alpha on \
-            -resize 480x480 \
-            -gravity center \
-            -extent 480x480 \
-            -strip \
-            "$OUT"
-
+          magick "$SRC" -background none -alpha on -resize 480x480 -gravity center -extent 480x480 -strip "$OUT"
           echo "✔ Splash transparente criado."
 
       - name: Configurar fundo do splash
         script: |
           set -e
-
-          mkdir -p \
-            "$MODULE_PATH/res/values" \
-            "$MODULE_PATH/res/values-night"
-
+          mkdir -p "$MODULE_PATH/res/values" "$MODULE_PATH/res/values-night"
           cat > "$MODULE_PATH/res/values/colors.xml" <<'EOF'
           <resources>
               <color name="splash_background">#FFFFFF</color>
           </resources>
           EOF
-
           cat > "$MODULE_PATH/res/values-night/colors.xml" <<'EOF'
           <resources>
               <color name="splash_background">#0D0D0D</color>
           </resources>
           EOF
 
-      - name: Baixar somente os Ionicons usados
+      - name: Baixar apenas os Ionicons usados (outline + filled)
         script: |
           set -e
-
-          OUT="$MODULE_PATH/assets/icons"
+          OUT_OUTLINE="$MODULE_PATH/assets/icons/svg/outline"
+          OUT_FILLED="$MODULE_PATH/assets/icons/svg/filled"
           BASE="https://raw.githubusercontent.com/ionic-team/ionicons/main/src/svg"
 
-          mkdir -p "$OUT"
+          mkdir -p "$OUT_OUTLINE" "$OUT_FILLED"
 
           cat > /tmp/brivane-icons.txt <<'EOF'
           add
+          alarm-outline
+          alarm
           apps-outline
           archive-outline
+          archive
           arrow-back
           arrow-redo-outline
           arrow-undo-outline
+          backspace-outline
           ban-outline
+          bar-chart-outline
           brush-outline
           calendar-outline
+          camera-outline
+          chatbox-ellipses-outline
+          chatbubble-ellipses
           checkbox-outline
-          checkmark
           checkmark-circle-outline
+          checkmark-circle
           checkmark-done-outline
+          checkmark
+          chevron-back
+          chevron-down
           chevron-forward
+          chevron-up
+          close-circle-outline
           close
+          code-slash-outline
           color-fill-outline
           color-palette-outline
-          document-text
+          color-palette
+          color-wand-outline
+          copy-outline
+          create-outline
           document-text-outline
+          document-text
+          documents-outline
+          download-outline
+          ellipse-outline
           ellipse
           ellipsis-horizontal
           ellipsis-vertical
-          folder
           folder-open-outline
+          folder-open
           folder-outline
+          folder
+          grid-outline
+          happy-outline
           image-outline
+          images-outline
           information-circle-outline
-          list
+          language-outline
+          layers-outline
+          link-outline
           list-outline
-          moon
-          notifications
+          list
+          lock-closed-outline
+          lock-open-outline
+          logo-facebook
+          logo-twitter
+          logo-whatsapp
+          mail
+          mic-outline
+          mic
+          move-outline
           notifications-outline
-          pin
+          notifications
+          nuclear-outline
+          paper-plane
+          pie-chart-outline
           pin-outline
-          pricetag
+          pin
+          play-circle
           pricetag-outline
-          search
+          pricetag
+          refresh-outline
+          remove-outline
+          reorder-four-outline
+          reorder-three-outline
+          reorder-two-outline
+          resize-outline
           search-outline
+          search
+          send
           settings-outline
+          share-outline
+          share-social-outline
+          shield-checkmark-outline
+          sparkles-outline
+          sparkles
+          square-outline
+          stats-chart-outline
+          stop-circle-outline
+          sunny
           swap-vertical-outline
+          text-outline
           text
           time-outline
           trash-bin-outline
           trash-outline
+          videocam-outline
+          warning-outline
           EOF
 
           while IFS= read -r icon; do
             [ -z "$icon" ] && continue
-
-            curl -fsSL \
-              "$BASE/$icon.svg" \
-              -o "$OUT/$icon.svg" \
-              || rm -f "$OUT/$icon.svg"
-
+            curl -fsSL "$BASE/$icon.svg" -o "$OUT_OUTLINE/$icon.svg" || rm -f "$OUT_OUTLINE/$icon.svg"
+            curl -fsSL "$BASE/$icon.svg" -o "$OUT_FILLED/$icon.svg" || rm -f "$OUT_FILLED/$icon.svg"
           done < /tmp/brivane-icons.txt
 
-          echo "✔ Ionicons processados."
+          echo "✔ Ionicons processados (outline + filled)."
 
       - name: Preparar Gradle
         script: |
           set -e
-
           chmod +x ./gradlew
-
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-
           ./gradlew --version
 
       - name: Build APK Release
         script: |
           set -e
-
-          ./gradlew \
-            clean \
-            assembleRelease \
-            --no-daemon \
-            --stacktrace
+          ./gradlew clean assembleRelease --no-daemon --stacktrace
 
       - name: Build AAB Release
         script: |
           set -e
-
-          ./gradlew \
-            bundleRelease \
-            --no-daemon \
-            --stacktrace
+          ./gradlew bundleRelease --no-daemon --stacktrace
 
       - name: Verificar artefatos
         script: |
           set -e
-
           echo "== APK =="
-          find app/build/outputs/apk/release \
-            -type f \
-            -name "*.apk" \
-            -print
-
+          find app/build/outputs/apk/release -type f -name "*.apk" -print
           echo "== AAB =="
-          find app/build/outputs/bundle/release \
-            -type f \
-            -name "*.aab" \
-            -print
+          find app/build/outputs/bundle/release -type f -name "*.aab" -print
 
     artifacts:
       - app/build/outputs/apk/release/*.apk

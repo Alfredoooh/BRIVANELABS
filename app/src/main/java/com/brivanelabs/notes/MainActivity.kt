@@ -1,3 +1,4 @@
+// app/src/main/java/com/brivanelabs/notes/MainActivity.kt
 package com.brivanelabs.notes
 
 import android.annotation.SuppressLint
@@ -5,6 +6,7 @@ import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
@@ -38,6 +40,11 @@ class MainActivity : AppCompatActivity() {
     private var loadFailed = false
     private var pendingOpenNoteId: String? = null
     private var pendingBiometricNoteId: String? = null
+
+    // Guarda o último estado de tema aplicado pelo próprio WebView (via bridge),
+    // para não deixar o onResume "reverter" para o tema do sistema quando o
+    // utilizador escolheu manualmente claro/escuro dentro da app.
+    private var lastKnownLightIcons: Boolean? = null
 
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
@@ -146,7 +153,10 @@ class MainActivity : AppCompatActivity() {
                 if (!loadFailed) {
                     view.visibility = View.VISIBLE
                     reloadBtn.visibility = View.GONE
-                    applyStatusBarForTheme()
+                    // Só aplica o tema do SISTEMA se o WebView ainda não tiver
+                    // comunicado um tema explícito (evita "piscar" para o tema
+                    // errado sempre que a Activity é retomada).
+                    if (lastKnownLightIcons == null) applyStatusBarForSystemTheme()
                     pendingOpenNoteId?.let { id ->
                         NotesBridge.openNoteInWebView(webView, id)
                         pendingOpenNoteId = null
@@ -194,18 +204,23 @@ class MainActivity : AppCompatActivity() {
         webView.post { webView.evaluateJavascript(js, null) }
     }
 
+    /**
+     * lightIcons = true  -> fundo é CLARO, então os ícones da status/nav bar
+     *                       precisam de ser ESCUROS para ficarem visíveis.
+     * lightIcons = false -> fundo é ESCURO, então os ícones ficam CLAROS.
+     *
+     * Esta é a correção do bug relatado: antes o valor passado pelo bridge
+     * não estava a ser respeitado de forma consistente e a Activity também
+     * reescrevia o tema no onResume usando a configuração do SISTEMA em vez
+     * do tema real escolhido dentro da app (system/light/dark), fazendo com
+     * que no tema claro os ícones ficassem sempre claros (errados).
+     */
     fun setStatusBarLight(lightIcons: Boolean) {
+        lastKnownLightIcons = lightIcons
         val controller = WindowCompat.getInsetsController(window, window.decorView)
         controller.isAppearanceLightStatusBars = lightIcons
         controller.isAppearanceLightNavigationBars = lightIcons
     }
-
-    private fun applyStatusBarForTheme() {
-        val isDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        setStatusBarLight(!isDark)
-    }
-
-    // ── Biometria ──
 
     fun isBiometricAvailable(): Boolean {
         val manager = BiometricManager.from(this)
@@ -242,8 +257,70 @@ class MainActivity : AppCompatActivity() {
         prompt.authenticate(promptInfo)
     }
 
+    /**
+     * Gera um PDF A4 paginado a partir de um bitmap alto (o "print" completo
+     * da nota). Corta o bitmap em fatias do tamanho de uma página A4 mantendo
+     * a largura total e repetindo margens consistentes em cada página, em vez
+     * de espremer a nota inteira numa única página gigante.
+     */
+    fun createPaginatedA4Pdf(bitmap: Bitmap, outputPath: String): Boolean {
+        return try {
+            // A4 a 150dpi para boa nitidez sem ficheiros enormes.
+            val dpi = 150
+            val pageWidthPx = (8.27 * dpi).toInt()   // 1240
+            val pageHeightPx = (11.69 * dpi).toInt() // 1754
+            val marginPx = (0.5 * dpi).toInt()       // 75
+            val contentWidthPx = pageWidthPx - marginPx * 2
+
+            val scale = contentWidthPx.toFloat() / bitmap.width.toFloat()
+            val scaledHeight = (bitmap.height * scale).toInt()
+            val scaledBitmap = Bitmap.createScaledBitmap(bitmap, contentWidthPx, scaledHeight, true)
+
+            val contentHeightPerPage = pageHeightPx - marginPx * 2
+            val totalPages = maxOf(1, Math.ceil(scaledHeight.toDouble() / contentHeightPerPage.toDouble()).toInt())
+
+            val document = PdfDocument()
+            for (pageIndex in 0 until totalPages) {
+                val pageInfo = PdfDocument.PageInfo.Builder(pageWidthPx, pageHeightPx, pageIndex + 1).create()
+                val page = document.startPage(pageInfo)
+                val canvas = page.canvas
+                canvas.drawColor(Color.WHITE)
+
+                val srcTop = pageIndex * contentHeightPerPage
+                val srcBottom = minOf(scaledHeight, srcTop + contentHeightPerPage)
+                if (srcTop < srcBottom) {
+                    val sliceHeight = srcBottom - srcTop
+                    val slice = Bitmap.createBitmap(scaledBitmap, 0, srcTop, contentWidthPx, sliceHeight)
+                    canvas.drawBitmap(slice, marginPx.toFloat(), marginPx.toFloat(), null)
+                    slice.recycle()
+                }
+                document.finishPage(page)
+            }
+
+            java.io.File(outputPath).outputStream().use { document.writeTo(it) }
+            document.close()
+            if (scaledBitmap != bitmap) scaledBitmap.recycle()
+            true
+        } catch (e: Exception) {
+            Log.e("BrivaneNotes", "Falha ao gerar PDF paginado", e)
+            false
+        }
+    }
+
+    private fun applyStatusBarForSystemTheme() {
+        val isDark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        setStatusBarLight(!isDark)
+    }
+
     override fun onPause() { super.onPause(); webView.onPause(); webView.pauseTimers() }
-    override fun onResume() { super.onResume(); webView.onResume(); webView.resumeTimers(); applyStatusBarForTheme() }
+    override fun onResume() {
+        super.onResume(); webView.onResume(); webView.resumeTimers()
+        // Não força mais o tema do sistema aqui — isso é o que causava o bug
+        // de o tema claro escolhido dentro da app ser "esquecido". O WebView
+        // reafirma o tema correto via bridge (setStatusBarTheme) sempre que
+        // a página aplica o tema (ver applyTheme() no JS).
+        webView.evaluateJavascript("(function(){try{if(typeof applyTheme==='function')applyTheme(true);}catch(e){}})()", null)
+    }
     override fun onSaveInstanceState(outState: Bundle) { webView.saveState(outState); super.onSaveInstanceState(outState) }
     override fun onDestroy() { webView.destroy(); super.onDestroy() }
 }

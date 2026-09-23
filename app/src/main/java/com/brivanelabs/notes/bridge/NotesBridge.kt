@@ -1,3 +1,4 @@
+// app/src/main/java/com/brivanelabs/notes/bridge/NotesBridge.kt
 package com.brivanelabs.notes.bridge
 
 import android.Manifest
@@ -10,7 +11,6 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -92,22 +92,24 @@ class NotesBridge(
         return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
-    // ── Tema / Status bar ──
-
     @JavascriptInterface
     fun isSystemDarkMode(): Boolean {
         val mode = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
         return mode == Configuration.UI_MODE_NIGHT_YES
     }
 
+    /**
+     * lightIcons=true significa "o fundo da app está claro" -> os ícones da
+     * status bar devem ficar escuros para se lerem. É isto que corrige o bug:
+     * o JS chama isto sempre que aplica o tema (claro/escuro/automático) e a
+     * Activity deixa de o sobrepor sozinha no onResume.
+     */
     @JavascriptInterface
     fun setStatusBarTheme(lightIcons: Boolean) {
         if (context is MainActivity) {
             webView.post { context.setStatusBarLight(lightIcons) }
         }
     }
-
-    // ── Preferências (tema, idioma) ──
 
     @JavascriptInterface
     fun getPreferences(): String {
@@ -123,23 +125,19 @@ class NotesBridge(
         prefs.edit().putString(key, value).apply()
     }
 
-    // ── Exportar / Partilhar ──
-
     @JavascriptInterface
     fun saveFile(name: String, content: String) {
         val dir = File(context.getExternalFilesDir(null), "Brivane Notes").apply { mkdirs() }
         File(dir, sanitizeFileName(name)).writeText(content)
     }
 
-    @JavascriptInterface
-    fun shareImage(app: String, title: String, text: String, base64Png: String) {
-        val bitmap = decodeBase64ToBitmap(base64Png) ?: return
-        val file = writeSharedFile("nota_${System.currentTimeMillis()}.png") { out ->
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
-        } ?: return
-        sendShareIntent(app, title, text, file, "image/png")
-    }
-
+    /**
+     * format: "image" | "pdf" | "txt"
+     * base64PngOrNull: para "image" e "pdf", o PNG completo (altura real da
+     * nota, sem cortes) gerado no lado JS via canvas.
+     * Para "pdf" o bitmap é automaticamente paginado em folhas A4 dentro de
+     * createPaginatedA4Pdf, preservando todo o conteúdo em várias páginas.
+     */
     @JavascriptInterface
     fun shareTo(app: String, format: String, title: String, text: String, base64PngOrNull: String?) {
         when (format) {
@@ -148,13 +146,17 @@ class NotesBridge(
                 val file = writeSharedFile("nota_${System.currentTimeMillis()}.png") { out ->
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
                 } ?: return
+                bitmap.recycle()
                 sendShareIntent(app, title, text, file, "image/png")
             }
             "pdf" -> {
                 val bitmap = base64PngOrNull?.let { decodeBase64ToBitmap(it) } ?: return
-                val file = writeSharedFile("nota_${System.currentTimeMillis()}.pdf") { out ->
-                    writeBitmapAsPdf(bitmap, out)
-                } ?: return
+                val dir = File(context.cacheDir, "shared_images").apply { mkdirs() }
+                val file = File(dir, "nota_${System.currentTimeMillis()}.pdf")
+                val activity = context as? MainActivity
+                val ok = activity?.createPaginatedA4Pdf(bitmap, file.absolutePath) ?: false
+                bitmap.recycle()
+                if (!ok) return
                 sendShareIntent(app, title, text, file, "application/pdf")
             }
             "txt" -> {
@@ -175,16 +177,6 @@ class NotesBridge(
         } catch (e: Exception) {
             null
         }
-    }
-
-    private fun writeBitmapAsPdf(bitmap: Bitmap, out: FileOutputStream) {
-        val document = PdfDocument()
-        val pageInfo = PdfDocument.PageInfo.Builder(bitmap.width, bitmap.height, 1).create()
-        val page = document.startPage(pageInfo)
-        page.canvas.drawBitmap(bitmap, 0f, 0f, null)
-        document.finishPage(page)
-        document.writeTo(out)
-        document.close()
     }
 
     private fun sendShareIntent(app: String, title: String, text: String, file: File, mimeType: String) {
@@ -226,8 +218,6 @@ class NotesBridge(
     private fun sanitizeFileName(name: String): String {
         return name.replace(Regex("[\\\\/:*?\"<>|]+"), "").trim().ifBlank { "nota" }
     }
-
-    // ── Bloqueio de nota (PIN + biometria) ──
 
     @JavascriptInterface
     fun setNotePin(noteId: String, pin: String) {

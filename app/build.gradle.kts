@@ -1,3 +1,4 @@
+// app/build.gradle.kts
 import java.util.Properties
 
 plugins {
@@ -20,7 +21,7 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 1
-        versionName = "1.2.0"
+        versionName = "1.3.0"
     }
 
     signingConfigs {

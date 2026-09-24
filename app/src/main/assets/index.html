@@ -35,8 +35,20 @@ input,textarea,[contenteditable]{-webkit-user-select:text;user-select:text;font-
 .tap{transition:transform .2s var(--emphasized),opacity .2s ease}
 .tap:active{transform:scale(.95);opacity:.85}
 
-.icon{pointer-events:none;display:inline-block;vertical-align:middle;background-color:currentColor;flex-shrink:0;
-  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;-webkit-mask-size:contain;mask-size:contain;width:24px;height:24px}
+.icon{
+  pointer-events:none;
+  display:inline-block;
+  vertical-align:middle;
+  flex-shrink:0;
+  -webkit-mask-repeat:no-repeat;
+  mask-repeat:no-repeat;
+  -webkit-mask-position:center;
+  mask-position:center;
+  -webkit-mask-size:contain;
+  mask-size:contain;
+  width:24px;
+  height:24px
+}
 .icon.sm{width:16px;height:16px}.icon.md{width:20px;height:20px}.icon.lg{width:28px;height:28px}.icon.xl{width:34px;height:34px}
 .icon.xxl{width:44px;height:44px}.icon.hg{width:52px;height:52px}
 .icon-png{pointer-events:none;display:inline-block;vertical-align:middle;flex-shrink:0;object-fit:contain}
@@ -558,11 +570,11 @@ body.editor-open #toast{bottom:calc(var(--kb) + var(--safe-bottom) + 16px + 52px
   <div class="page" id="page-editor">
     <div class="page-bar">
       <button class="page-back tap" data-back><span class="icon" data-ic="arrow-back"></span></button>
-      <div id="ed-bar-actions">
-        <button class="icon-plain tap disabled" id="ed-undo" aria-label="Desfazer"><span class="icon" data-ic="undo"></span></button>
-        <button class="icon-plain tap disabled" id="ed-redo" aria-label="Refazer"><span class="icon" data-ic="redo"></span></button>
-      </div>
       <div style="flex:1"></div>
+      <div id="ed-bar-actions">
+        <button class="icon-plain tap disabled" id="ed-undo" aria-label="Desfazer"><span class="icon" data-ic="arrow-undo-outline"></span></button>
+        <button class="icon-plain tap disabled" id="ed-redo" aria-label="Refazer"><span class="icon" data-ic="arrow-redo-outline"></span></button>
+      </div>
       <button class="icon-plain tap" id="ed-more" aria-label="Opções"><span class="icon" data-ic="ellipsis-vertical"></span></button>
     </div>
     <div id="ed-scroll">
@@ -749,7 +761,7 @@ const ICON_BASE = 'icons/svg/';
 const ICON_PNG_BASE = 'icons/png/';
 function ic(name, size) {
   const s = size || 24;
-  return `<span class="icon" style="width:${s}px;height:${s}px;-webkit-mask-image:url(${ICON_BASE}${name}.svg);mask-image:url(${ICON_BASE}${name}.svg)"></span>`;
+  return `<span class="icon" style="width:${s}px;height:${s}px;-webkit-mask-image:url(${ICON_BASE}${name}.svg);mask-image:url(${ICON_BASE}${name}.svg);background-color:currentColor"></span>`;
 }
 function icPng(name, size) {
   const s = size || 24;
@@ -757,13 +769,20 @@ function icPng(name, size) {
 }
 function applyMaskIcons(root) {
   (root || document).querySelectorAll('[data-ic]').forEach(el => {
-    const n = el.dataset.ic; if (el.dataset.icApplied === n) return;
-    el.dataset.icApplied = n;
+    const n = el.dataset.ic;
+    if (el.dataset.icApplied === n) return;
     el.style.webkitMaskImage = `url(${ICON_BASE}${n}.svg)`;
     el.style.maskImage = `url(${ICON_BASE}${n}.svg)`;
+    el.style.backgroundColor = 'currentColor';
+    el.dataset.icApplied = n;
   });
 }
-function setIcon(el, name) { if (!el) return; el.dataset.ic = name; el.dataset.icApplied = ''; applyMaskIcons(el.parentNode || document); }
+function setIcon(el, name) {
+  if (!el) return;
+  el.dataset.ic = name;
+  el.dataset.icApplied = '';
+  applyMaskIcons(el.parentNode || document);
+}
 const folderIconHTML = '<span class="icon sm" data-ic="folder"></span>';
 
 function load(key, fb) { try { const v = localStorage.getItem(key); return v === null ? fb : JSON.parse(v); } catch { return fb; } }

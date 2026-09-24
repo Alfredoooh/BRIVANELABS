@@ -15,7 +15,6 @@ workflows:
         script: |
           set -e
           brew install imagemagick || true
-          brew install curl || true
 
       - name: Verificar projeto
         script: |
@@ -26,38 +25,67 @@ workflows:
           test -f "$MODULE_PATH/AndroidManifest.xml"
           test -f "$MODULE_PATH/java/com/brivanelabs/notes/MainActivity.kt"
           test -f "$MODULE_PATH/assets/index.html"
+          test -f "$MODULE_PATH/assets/icons/svg"
           test -f "./gradlew"
           test -f "keystore/brivane-release.jks"
           test -f "keystore/key.properties"
-          echo "✔ Estrutura do projeto OK."
+          test -f "ic_launcher.png"
+          test -f "splash_icon.png"
+          echo "✔ Estrutura do projeto OK (ícones locais em icons/svg confirmados, nada será baixado)."
 
-      - name: Gerar ic_launcher
+      - name: Gerar ic_launcher (mipmaps + adaptativo + 512x512 para a loja)
         script: |
           set -e
           SRC="ic_launcher.png"
           RES="$MODULE_PATH/res"
+          META="artifacts_meta"
+
           test -f "$SRC"
-          mkdir -p "$RES/mipmap-mdpi" "$RES/mipmap-hdpi" "$RES/mipmap-xhdpi" "$RES/mipmap-xxhdpi" "$RES/mipmap-xxxhdpi" "$RES/mipmap-anydpi-v26" "$RES/drawable" "$RES/values"
-          rm -f "$RES/mipmap-mdpi/ic_launcher.xml" "$RES/mipmap-mdpi/ic_launcher_round.xml"
-          rm -f "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
+
+          # Garante que o fonte é ao menos 512x512 antes de gerar qualquer densidade,
+          # para nunca fazer upscale (o que gera serrilhado/blur nos ícones).
+          SRC_W=$(identify -format "%w" "$SRC")
+          SRC_H=$(identify -format "%h" "$SRC")
+          if [ "$SRC_W" -lt 512 ] || [ "$SRC_H" -lt 512 ]; then
+            echo "✘ ic_launcher.png tem ${SRC_W}x${SRC_H}, menor que 512x512. Substitua o arquivo na raiz do repositório."
+            exit 1
+          fi
+
+          mkdir -p "$RES/mipmap-mdpi" "$RES/mipmap-hdpi" "$RES/mipmap-xhdpi" "$RES/mipmap-xxhdpi" "$RES/mipmap-xxxhdpi" "$RES/mipmap-anydpi-v26" "$RES/drawable" "$RES/values" "$META"
+
+          # Remove QUALQUER ic_launcher*.xml (vector drawable placeholder) em TODAS as
+          # pastas mipmap-*, não só as citadas nominalmente. O AAPT2 trata ic_launcher.xml
+          # e ic_launcher.png na mesma pasta como "duplicate resource" e derruba o build
+          # inteiro — isso já existia no projeto (mipmap-mdpi tinha os dois) e travaria o
+          # assembleRelease/bundleRelease mesmo com os PNGs corretos.
+          find "$RES" -path "*/mipmap-*/ic_launcher*.xml" -delete
           rm -f "$RES/drawable/ic_launcher_foreground.xml"
-          magick "$SRC" -background none -alpha on -resize 48x48 -gravity center -extent 48x48 -strip "$RES/mipmap-mdpi/ic_launcher.png"
-          magick "$SRC" -background none -alpha on -resize 72x72 -gravity center -extent 72x72 -strip "$RES/mipmap-hdpi/ic_launcher.png"
-          magick "$SRC" -background none -alpha on -resize 96x96 -gravity center -extent 96x96 -strip "$RES/mipmap-xhdpi/ic_launcher.png"
-          magick "$SRC" -background none -alpha on -resize 144x144 -gravity center -extent 144x144 -strip "$RES/mipmap-xxhdpi/ic_launcher.png"
-          magick "$SRC" -background none -alpha on -resize 192x192 -gravity center -extent 192x192 -strip "$RES/mipmap-xxxhdpi/ic_launcher.png"
-          cp "$RES/mipmap-mdpi/ic_launcher.png" "$RES/mipmap-mdpi/ic_launcher_round.png"
-          cp "$RES/mipmap-hdpi/ic_launcher.png" "$RES/mipmap-hdpi/ic_launcher_round.png"
-          cp "$RES/mipmap-xhdpi/ic_launcher.png" "$RES/mipmap-xhdpi/ic_launcher_round.png"
+
+          # Densidades padrão do launcher (quadrado, usado em launchers que não suportam ícone adaptativo)
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 48x48 -gravity center -extent 48x48 -strip "$RES/mipmap-mdpi/ic_launcher.png"
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 72x72 -gravity center -extent 72x72 -strip "$RES/mipmap-hdpi/ic_launcher.png"
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 96x96 -gravity center -extent 96x96 -strip "$RES/mipmap-xhdpi/ic_launcher.png"
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 144x144 -gravity center -extent 144x144 -strip "$RES/mipmap-xxhdpi/ic_launcher.png"
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 192x192 -gravity center -extent 192x192 -strip "$RES/mipmap-xxxhdpi/ic_launcher.png"
+
+          cp "$RES/mipmap-mdpi/ic_launcher.png"   "$RES/mipmap-mdpi/ic_launcher_round.png"
+          cp "$RES/mipmap-hdpi/ic_launcher.png"   "$RES/mipmap-hdpi/ic_launcher_round.png"
+          cp "$RES/mipmap-xhdpi/ic_launcher.png"  "$RES/mipmap-xhdpi/ic_launcher_round.png"
           cp "$RES/mipmap-xxhdpi/ic_launcher.png" "$RES/mipmap-xxhdpi/ic_launcher_round.png"
           cp "$RES/mipmap-xxxhdpi/ic_launcher.png" "$RES/mipmap-xxxhdpi/ic_launcher_round.png"
-          magick "$SRC" -background none -alpha on -resize 432x432 -gravity center -extent 432x432 -strip "$RES/drawable/ic_launcher_foreground.png"
+
+          # Ícone adaptativo (Android 8+): foreground em 432x432px (=108dp em xxxhdpi),
+          # com a arte ocupando só a "safe zone" central de 66% para não ser cortada
+          # pela máscara circular/quadrada/squircle que cada fabricante aplica.
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 264x264 -gravity center -extent 432x432 -strip "$RES/drawable/ic_launcher_foreground.png"
+
           cat > "$RES/values/ic_launcher_background.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <resources>
               <color name="ic_launcher_background">#FFFFFF</color>
           </resources>
           EOF
+
           cat > "$RES/mipmap-anydpi-v26/ic_launcher.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
@@ -66,18 +94,52 @@ workflows:
           </adaptive-icon>
           EOF
           cp "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
-          echo "✔ Launcher criado."
 
-      - name: Gerar splash transparente
+          # Ícone de 512x512 para a ficha da loja (Play Console) e para anexar ao build.
+          # Fica fora de res/ de propósito: não deve ser empacotado no APK/AAB.
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 512x512 -gravity center -extent 512x512 -strip "$META/ic_launcher-playstore-512.png"
+
+          echo "✔ Launcher criado em todas as densidades corretas (mdpi 48px até xxxhdpi 192px) + 512x512 para a loja em $META/."
+
+      - name: Gerar splash icon (todas as densidades, dentro da zona segura da Splash Screen API)
         script: |
           set -e
           SRC="splash_icon.png"
-          OUT="$MODULE_PATH/res/drawable/splash_icon.png"
+          RES="$MODULE_PATH/res"
+
           test -f "$SRC"
-          mkdir -p "$(dirname "$OUT")"
-          rm -f "$MODULE_PATH/res/drawable/splash_icon.xml"
-          magick "$SRC" -background none -alpha on -resize 480x480 -gravity center -extent 480x480 -strip "$OUT"
-          echo "✔ Splash transparente criado."
+
+          SRC_W=$(identify -format "%w" "$SRC")
+          SRC_H=$(identify -format "%h" "$SRC")
+          if [ "$SRC_W" -lt 288 ] || [ "$SRC_H" -lt 288 ]; then
+            echo "✘ splash_icon.png tem ${SRC_W}x${SRC_H}, menor que o mínimo recomendado de 288x288. Substitua o arquivo na raiz do repositório."
+            exit 1
+          fi
+
+          mkdir -p "$RES/drawable-mdpi" "$RES/drawable-hdpi" "$RES/drawable-xhdpi" "$RES/drawable-xxhdpi" "$RES/drawable-xxxhdpi"
+
+          # Mesmo motivo do launcher: remove qualquer splash_icon*.xml residual em
+          # qualquer pasta drawable* para não colidir com os splash_icon*.png novos.
+          find "$RES" -path "*/drawable*/splash_icon*.xml" -delete
+          rm -f "$RES/drawable/splash_icon.png"
+
+          # A Splash Screen API (Android 12+) reserva uma janela de até 240dp para o
+          # ícone animado, exibindo com segurança apenas os 160dp centrais; conteúdo
+          # fora disso pode ser cortado. Por isso a arte é redimensionada para caber
+          # em 160dp e centralizada dentro de um canvas de 240dp por densidade,
+          # exatamente como os splash screens nativos do Android esperam:
+          #   mdpi   = 1x  -> arte 160px  em canvas 240px
+          #   hdpi   = 1.5x -> arte 240px  em canvas 360px
+          #   xhdpi  = 2x  -> arte 320px  em canvas 480px
+          #   xxhdpi = 3x  -> arte 480px  em canvas 720px
+          #   xxxhdpi= 4x  -> arte 640px  em canvas 960px
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 160x160 -gravity center -extent 240x240 -strip "$RES/drawable-mdpi/splash_icon.png"
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 240x240 -gravity center -extent 360x360 -strip "$RES/drawable-hdpi/splash_icon.png"
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 320x320 -gravity center -extent 480x480 -strip "$RES/drawable-xhdpi/splash_icon.png"
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 480x480 -gravity center -extent 720x720 -strip "$RES/drawable-xxhdpi/splash_icon.png"
+          magick "$SRC" -background none -alpha on -filter Lanczos -resize 640x640 -gravity center -extent 960x960 -strip "$RES/drawable-xxxhdpi/splash_icon.png"
+
+          echo "✔ Splash criado em todas as densidades (arte contida na zona segura de 160dp dentro do canvas de 240dp)."
 
       - name: Configurar fundo do splash
         script: |
@@ -93,129 +155,6 @@ workflows:
               <color name="splash_background">#0D0D0D</color>
           </resources>
           EOF
-
-      - name: Baixar apenas os Ionicons usados (outline + filled)
-        script: |
-          set -e
-          OUT_OUTLINE="$MODULE_PATH/assets/icons/svg/outline"
-          OUT_FILLED="$MODULE_PATH/assets/icons/svg/filled"
-          BASE="https://raw.githubusercontent.com/ionic-team/ionicons/main/src/svg"
-
-          mkdir -p "$OUT_OUTLINE" "$OUT_FILLED"
-
-          cat > /tmp/brivane-icons.txt <<'EOF'
-          add
-          alarm-outline
-          alarm
-          apps-outline
-          archive-outline
-          archive
-          arrow-back
-          arrow-redo-outline
-          arrow-undo-outline
-          backspace-outline
-          ban-outline
-          bar-chart-outline
-          brush-outline
-          calendar-outline
-          camera-outline
-          chatbox-ellipses-outline
-          chatbubble-ellipses
-          checkbox-outline
-          checkmark-circle-outline
-          checkmark-circle
-          checkmark-done-outline
-          checkmark
-          chevron-back
-          chevron-down
-          chevron-forward
-          chevron-up
-          close-circle-outline
-          close
-          code-slash-outline
-          color-fill-outline
-          color-palette-outline
-          color-palette
-          color-wand-outline
-          copy-outline
-          create-outline
-          document-text-outline
-          document-text
-          documents-outline
-          download-outline
-          ellipse-outline
-          ellipse
-          ellipsis-horizontal
-          ellipsis-vertical
-          folder-open-outline
-          folder-open
-          folder-outline
-          folder
-          grid-outline
-          happy-outline
-          image-outline
-          images-outline
-          information-circle-outline
-          language-outline
-          layers-outline
-          link-outline
-          list-outline
-          list
-          lock-closed-outline
-          lock-open-outline
-          logo-facebook
-          logo-twitter
-          logo-whatsapp
-          mail
-          mic-outline
-          mic
-          move-outline
-          notifications-outline
-          notifications
-          nuclear-outline
-          paper-plane
-          pie-chart-outline
-          pin-outline
-          pin
-          play-circle
-          pricetag-outline
-          pricetag
-          refresh-outline
-          remove-outline
-          reorder-four-outline
-          reorder-three-outline
-          reorder-two-outline
-          resize-outline
-          search-outline
-          search
-          send
-          settings-outline
-          share-outline
-          share-social-outline
-          shield-checkmark-outline
-          sparkles-outline
-          sparkles
-          square-outline
-          stats-chart-outline
-          stop-circle-outline
-          sunny
-          swap-vertical-outline
-          text-outline
-          text
-          time-outline
-          trash-bin-outline
-          trash-outline
-          videocam-outline
-          warning-outline
-          EOF
-
-          while IFS= read -r icon; do
-            [ -z "$icon" ] && continue
-            curl -fsSL "$BASE/$icon.svg" -o "$OUT_OUTLINE/$icon.svg" || rm -f "$OUT_OUTLINE/$icon.svg"
-            curl -fsSL "$BASE/$icon.svg" -o "$OUT_FILLED/$icon.svg" || rm -f "$OUT_FILLED/$icon.svg"
-          done < /tmp/brivane-icons.txt
-
-          echo "✔ Ionicons processados (outline + filled)."
 
       - name: Preparar Gradle
         script: |
@@ -241,10 +180,13 @@ workflows:
           find app/build/outputs/apk/release -type f -name "*.apk" -print
           echo "== AAB =="
           find app/build/outputs/bundle/release -type f -name "*.aab" -print
+          echo "== Ícone 512x512 para a loja =="
+          find artifacts_meta -type f -name "*.png" -print
 
     artifacts:
       - app/build/outputs/apk/release/*.apk
       - app/build/outputs/bundle/release/*.aab
+      - artifacts_meta/*.png
 
     publishing:
       email:

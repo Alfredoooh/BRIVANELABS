@@ -1,1 +1,6 @@
-<?xml version="1.0" encoding="utf-8"?><paths><cache-path name="shared_images" path="shared_images/" /></paths>
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="shared_images" path="shared_images/" />
+    <cache-path name="camera_capture" path="camera_capture/" />
+    <external-files-path name="camera_external" path="Pictures/" />
+</paths>

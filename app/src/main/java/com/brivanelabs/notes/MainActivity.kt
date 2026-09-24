@@ -1,8 +1,10 @@
 // app/src/main/java/com/brivanelabs/notes/MainActivity.kt
 package com.brivanelabs.notes
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -14,12 +16,14 @@ import android.view.View
 import android.webkit.ConsoleMessage
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
+import android.webkit.PermissionRequest
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.FrameLayout
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
@@ -27,11 +31,17 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import com.brivanelabs.notes.bridge.NotesBridge
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import android.provider.MediaStore
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
@@ -49,6 +59,22 @@ class MainActivity : AppCompatActivity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
 
+    // ---- Splash em Kotlin ----
+    private lateinit var splashOverlay: FrameLayout
+    private var splashStartedAt = 0L
+    private var splashHidden = false
+    private var pageReady = false
+    private val splashMinMs = 2000L
+    private val splashHandler = Handler(Looper.getMainLooper())
+
+    // ---- Permissões (câmera / microfone) ----
+    private var pendingWebPermissionRequest: PermissionRequest? = null
+    private var pendingCameraCaptureUri: Uri? = null
+    private lateinit var webPermissionLauncher: ActivityResultLauncher<Array<String>>
+    private lateinit var cameraPermissionForChooserLauncher: ActivityResultLauncher<String>
+    private var pendingChooserParams: WebChromeClient.FileChooserParams? = null
+    private var pendingChooserCallback: ValueCallback<Array<Uri>>? = null
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -59,16 +85,53 @@ class MainActivity : AppCompatActivity() {
             filePathCallback = null
             if (callback == null) return@registerForActivityResult
             val data = result.data
+            val captureUri = pendingCameraCaptureUri
+            pendingCameraCaptureUri = null
             val uris: Array<Uri>? = when {
                 result.resultCode != RESULT_OK -> null
+                captureUri != null && data?.data == null && data?.clipData == null -> arrayOf(captureUri)
                 data?.clipData != null -> {
                     val clip = data.clipData!!
-                    Array(clip.itemCount) { i -> clip.getItemAt(i).uri }
+                    Array(clip.itemCount) { i -> clip.itemAt(i).uri }
                 }
                 data?.data != null -> arrayOf(data.data!!)
+                captureUri != null -> arrayOf(captureUri)
                 else -> null
             }
             callback.onReceiveValue(uris)
+        }
+
+        // Permissões pedidas pelo WebView (getUserMedia: câmera / microfone)
+        webPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
+            val request = pendingWebPermissionRequest
+            pendingWebPermissionRequest = null
+            if (request == null) return@registerForActivityResult
+            val toGrant = ArrayList<String>()
+            request.resources.forEach { res ->
+                when (res) {
+                    PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
+                        if (grants[Manifest.permission.CAMERA] == true || hasPermission(Manifest.permission.CAMERA)) toGrant.add(res)
+                    PermissionRequest.RESOURCE_AUDIO_CAPTURE ->
+                        if (grants[Manifest.permission.RECORD_AUDIO] == true || hasPermission(Manifest.permission.RECORD_AUDIO)) toGrant.add(res)
+                }
+            }
+            if (toGrant.isEmpty()) request.deny() else request.grant(toGrant.toTypedArray())
+        }
+
+        // Permissão de CÂMERA pedida antes de abrir a câmera via <input capture>
+        cameraPermissionForChooserLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val params = pendingChooserParams
+            val callback = pendingChooserCallback
+            pendingChooserParams = null
+            pendingChooserCallback = null
+            if (callback == null) return@registerForActivityResult
+            if (granted && params != null) {
+                launchFileChooser(callback, params, allowCamera = true)
+            } else if (params != null) {
+                launchFileChooser(callback, params, allowCamera = false)
+            } else {
+                callback.onReceiveValue(null)
+            }
         }
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -78,14 +141,17 @@ class MainActivity : AppCompatActivity() {
 
         webView = findViewById(R.id.webView)
         reloadBtn = findViewById(R.id.reloadBtn)
+        splashOverlay = findViewById(R.id.splashOverlay)
+        splashStartedAt = SystemClock.elapsedRealtime()
+        splashHandler.postDelayed({ hideSplash(force = true) }, 12000L)
 
-        ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById<View>(R.id.rootFrame)) { _, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
-            val bottom = maxOf(bars.bottom, ime.bottom)
-            view.setPadding(0, 0, 0, 0)
-            applyKeyboardInsetToWebView(bottom)
-            WindowInsetsCompat.CONSUMED
+            val imeVisible = insets.isVisible(WindowInsetsCompat.Type.ime())
+            val keyboardPx = if (imeVisible) maxOf(0, ime.bottom - bars.bottom) else 0
+            applyKeyboardInsetToWebView(keyboardPx)
+            insets
         }
 
         webView.settings.apply {
@@ -112,23 +178,49 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
 
+            override fun onPermissionRequest(request: PermissionRequest) {
+                runOnUiThread {
+                    val needed = ArrayList<String>()
+                    request.resources.forEach { res ->
+                        when (res) {
+                            PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
+                                if (!hasPermission(Manifest.permission.CAMERA)) needed.add(Manifest.permission.CAMERA)
+                            PermissionRequest.RESOURCE_AUDIO_CAPTURE ->
+                                if (!hasPermission(Manifest.permission.RECORD_AUDIO)) needed.add(Manifest.permission.RECORD_AUDIO)
+                        }
+                    }
+                    if (needed.isEmpty()) {
+                        val ok = request.resources.filter {
+                            it == PermissionRequest.RESOURCE_VIDEO_CAPTURE || it == PermissionRequest.RESOURCE_AUDIO_CAPTURE
+                        }
+                        if (ok.isEmpty()) request.deny() else request.grant(ok.toTypedArray())
+                    } else {
+                        pendingWebPermissionRequest?.deny()
+                        pendingWebPermissionRequest = request
+                        webPermissionLauncher.launch(needed.toTypedArray())
+                    }
+                }
+            }
+
+            override fun onPermissionRequestCanceled(request: PermissionRequest) {
+                if (pendingWebPermissionRequest == request) pendingWebPermissionRequest = null
+            }
+
             override fun onShowFileChooser(
                 view: WebView,
                 callback: ValueCallback<Array<Uri>>,
                 params: FileChooserParams
             ): Boolean {
                 filePathCallback?.onReceiveValue(null)
-                filePathCallback = callback
-                val intent = params.createIntent().apply {
-                    if (type == null) type = "image/*"
+                filePathCallback = null
+                val wantsCamera = params.isCaptureEnabled
+                if (wantsCamera && !hasPermission(Manifest.permission.CAMERA)) {
+                    pendingChooserParams = params
+                    pendingChooserCallback = callback
+                    cameraPermissionForChooserLauncher.launch(Manifest.permission.CAMERA)
+                    return true
                 }
-                return try {
-                    fileChooserLauncher.launch(intent)
-                    true
-                } catch (e: Exception) {
-                    filePathCallback = null
-                    false
-                }
+                return launchFileChooser(callback, params, allowCamera = wantsCamera)
             }
         }
 
@@ -146,6 +238,7 @@ class MainActivity : AppCompatActivity() {
                     view.stopLoading()
                     view.visibility = View.INVISIBLE
                     reloadBtn.visibility = View.VISIBLE
+                    hideSplash(force = true)
                 }
             }
             override fun onPageFinished(view: WebView, url: String?) {
@@ -153,6 +246,12 @@ class MainActivity : AppCompatActivity() {
                 if (!loadFailed) {
                     view.visibility = View.VISIBLE
                     reloadBtn.visibility = View.GONE
+                    pageReady = true
+                    view.postVisualStateCallback(System.nanoTime(), object : WebView.VisualStateCallback() {
+                        override fun onComplete(requestId: Long) {
+                            hideSplash(force = false)
+                        }
+                    })
                     // Só aplica o tema do SISTEMA se o WebView ainda não tiver
                     // comunicado um tema explícito (evita "piscar" para o tema
                     // errado sempre que a Activity é retomada).
@@ -198,9 +297,12 @@ class MainActivity : AppCompatActivity() {
     private fun applyKeyboardInsetToWebView(bottomPx: Int) {
         if (!::webView.isInitialized) return
         val density = resources.displayMetrics.density
-        val bottomDp = (bottomPx / density)
-        val js = "document.documentElement.style.setProperty('--android-kb', '${bottomDp}px'); " +
-            "if (typeof updateKeyboard === 'function') updateKeyboard();"
+        val bottomDp = Math.round(bottomPx / density)
+        val js = "(function(){try{" +
+            "window.__nativeKb=$bottomDp;" +
+            "document.documentElement.style.setProperty('--kb','${bottomDp}px');" +
+            "if(typeof scrollCaretIntoView==='function'&&$bottomDp>40){scrollCaretIntoView();}" +
+            "}catch(e){}})();"
         webView.post { webView.evaluateJavascript(js, null) }
     }
 
@@ -322,5 +424,79 @@ class MainActivity : AppCompatActivity() {
         webView.evaluateJavascript("(function(){try{if(typeof applyTheme==='function')applyTheme(true);}catch(e){}})()", null)
     }
     override fun onSaveInstanceState(outState: Bundle) { webView.saveState(outState); super.onSaveInstanceState(outState) }
-    override fun onDestroy() { webView.destroy(); super.onDestroy() }
+    override fun onDestroy() {
+        splashHandler.removeCallbacksAndMessages(null)
+        webView.destroy()
+        super.onDestroy()
+    }
+
+    private fun hideSplash(force: Boolean) {
+        if (splashHidden) return
+        if (!force && !pageReady) return
+        val elapsed = SystemClock.elapsedRealtime() - splashStartedAt
+        val remaining = if (force) 0L else (splashMinMs - elapsed).coerceAtLeast(0L)
+        splashHandler.postDelayed({
+            if (splashHidden) return@postDelayed
+            splashHidden = true
+            splashOverlay.animate()
+                .alpha(0f)
+                .setDuration(280L)
+                .withEndAction { splashOverlay.visibility = View.GONE }
+                .start()
+        }, remaining)
+    }
+
+    private fun hasPermission(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun launchFileChooser(
+        callback: ValueCallback<Array<Uri>>,
+        params: WebChromeClient.FileChooserParams,
+        allowCamera: Boolean
+    ): Boolean {
+        filePathCallback = callback
+        pendingCameraCaptureUri = null
+
+        val intent: Intent
+        if (allowCamera && params.isCaptureEnabled) {
+            val accepts = params.acceptTypes?.joinToString(",").orEmpty()
+            val wantsVideo = accepts.contains("video")
+            val captureIntent = Intent(
+                if (wantsVideo) MediaStore.ACTION_VIDEO_CAPTURE
+                else MediaStore.ACTION_IMAGE_CAPTURE
+            )
+
+            if (!wantsVideo) {
+                val dir = File(cacheDir, "camera_capture").apply { mkdirs() }
+                val photo = File(dir, "foto_${System.currentTimeMillis()}.jpg")
+                val uri = FileProvider.getUriForFile(
+                    this,
+                    "$packageName.fileprovider",
+                    photo
+                )
+                pendingCameraCaptureUri = uri
+                captureIntent.putExtra(MediaStore.EXTRA_OUTPUT, uri)
+                captureIntent.addFlags(
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+
+            intent = captureIntent
+        } else {
+            intent = params.createIntent().apply {
+                if (type == null) type = "image/*"
+            }
+        }
+
+        return try {
+            fileChooserLauncher.launch(intent)
+            true
+        } catch (e: Exception) {
+            filePathCallback = null
+            pendingCameraCaptureUri = null
+            callback.onReceiveValue(null)
+            false
+        }
+    }
 }

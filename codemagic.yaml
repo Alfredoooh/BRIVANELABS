@@ -1,4 +1,3 @@
-# codemagic.yaml
 workflows:
   brivane-notes-android:
     name: Brivane Notes Android
@@ -6,6 +5,9 @@ workflows:
     instance_type: mac_mini_m2
 
     environment:
+      android_signing:
+        - brivane-notes-release
+
       vars:
         PACKAGE_NAME: "com.brivanelabs.notes"
         MODULE_PATH: "app/src/main"
@@ -14,70 +16,111 @@ workflows:
       - name: Instalar ferramentas
         script: |
           set -e
+
           brew install imagemagick || true
+          brew install curl || true
 
       - name: Verificar projeto
         script: |
           set -e
+
           test -f "settings.gradle.kts"
           test -f "build.gradle.kts"
           test -f "app/build.gradle.kts"
           test -f "$MODULE_PATH/AndroidManifest.xml"
           test -f "$MODULE_PATH/java/com/brivanelabs/notes/MainActivity.kt"
           test -f "$MODULE_PATH/assets/index.html"
-          test -f "$MODULE_PATH/assets/icons/svg"
           test -f "./gradlew"
-          test -f "keystore/brivane-release.jks"
-          test -f "keystore/key.properties"
-          test -f "ic_launcher.png"
-          test -f "splash_icon.png"
-          echo "✔ Estrutura do projeto OK (ícones locais em icons/svg confirmados, nada será baixado)."
 
-      - name: Gerar ic_launcher (mipmaps + adaptativo + 512x512 para a loja)
+          echo "✔ Estrutura do projeto OK."
+
+      - name: Gerar ic_launcher
         script: |
           set -e
+
           SRC="ic_launcher.png"
           RES="$MODULE_PATH/res"
-          META="artifacts_meta"
 
           test -f "$SRC"
 
-          # Garante que o fonte é ao menos 512x512 antes de gerar qualquer densidade,
-          # para nunca fazer upscale (o que gera serrilhado/blur nos ícones).
-          SRC_W=$(identify -format "%w" "$SRC")
-          SRC_H=$(identify -format "%h" "$SRC")
-          if [ "$SRC_W" -lt 512 ] || [ "$SRC_H" -lt 512 ]; then
-            echo "✘ ic_launcher.png tem ${SRC_W}x${SRC_H}, menor que 512x512. Substitua o arquivo na raiz do repositório."
-            exit 1
-          fi
+          mkdir -p \
+            "$RES/mipmap-mdpi" \
+            "$RES/mipmap-hdpi" \
+            "$RES/mipmap-xhdpi" \
+            "$RES/mipmap-xxhdpi" \
+            "$RES/mipmap-xxxhdpi" \
+            "$RES/mipmap-anydpi-v26" \
+            "$RES/drawable-nodpi" \
+            "$RES/values"
 
-          mkdir -p "$RES/mipmap-mdpi" "$RES/mipmap-hdpi" "$RES/mipmap-xhdpi" "$RES/mipmap-xxhdpi" "$RES/mipmap-xxxhdpi" "$RES/mipmap-anydpi-v26" "$RES/drawable" "$RES/values" "$META"
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize "48x48>" \
+            -gravity center \
+            -extent 48x48 \
+            -strip \
+            "$RES/mipmap-mdpi/ic_launcher.png"
 
-          # Remove QUALQUER ic_launcher*.xml (vector drawable placeholder) em TODAS as
-          # pastas mipmap-*, não só as citadas nominalmente. O AAPT2 trata ic_launcher.xml
-          # e ic_launcher.png na mesma pasta como "duplicate resource" e derruba o build
-          # inteiro — isso já existia no projeto (mipmap-mdpi tinha os dois) e travaria o
-          # assembleRelease/bundleRelease mesmo com os PNGs corretos.
-          find "$RES" -path "*/mipmap-*/ic_launcher*.xml" -delete
-          rm -f "$RES/drawable/ic_launcher_foreground.xml"
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize "72x72>" \
+            -gravity center \
+            -extent 72x72 \
+            -strip \
+            "$RES/mipmap-hdpi/ic_launcher.png"
 
-          # Densidades padrão do launcher (quadrado, usado em launchers que não suportam ícone adaptativo)
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 48x48 -gravity center -extent 48x48 -strip "$RES/mipmap-mdpi/ic_launcher.png"
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 72x72 -gravity center -extent 72x72 -strip "$RES/mipmap-hdpi/ic_launcher.png"
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 96x96 -gravity center -extent 96x96 -strip "$RES/mipmap-xhdpi/ic_launcher.png"
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 144x144 -gravity center -extent 144x144 -strip "$RES/mipmap-xxhdpi/ic_launcher.png"
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 192x192 -gravity center -extent 192x192 -strip "$RES/mipmap-xxxhdpi/ic_launcher.png"
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize "96x96>" \
+            -gravity center \
+            -extent 96x96 \
+            -strip \
+            "$RES/mipmap-xhdpi/ic_launcher.png"
 
-          cp "$RES/mipmap-mdpi/ic_launcher.png"   "$RES/mipmap-mdpi/ic_launcher_round.png"
-          cp "$RES/mipmap-hdpi/ic_launcher.png"   "$RES/mipmap-hdpi/ic_launcher_round.png"
-          cp "$RES/mipmap-xhdpi/ic_launcher.png"  "$RES/mipmap-xhdpi/ic_launcher_round.png"
-          cp "$RES/mipmap-xxhdpi/ic_launcher.png" "$RES/mipmap-xxhdpi/ic_launcher_round.png"
-          cp "$RES/mipmap-xxxhdpi/ic_launcher.png" "$RES/mipmap-xxxhdpi/ic_launcher_round.png"
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize "144x144>" \
+            -gravity center \
+            -extent 144x144 \
+            -strip \
+            "$RES/mipmap-xxhdpi/ic_launcher.png"
 
-          # Ícone adaptativo (Android 8+): foreground em 432x432px (=108dp em xxxhdpi),
-          # com a arte ocupando só a "safe zone" central de 66% para não ser cortada
-          # pela máscara circular/quadrada/squircle que cada fabricante aplica.
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 264x264 -gravity center -extent 432x432 -strip "$RES/drawable/ic_launcher_foreground.png"
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize "192x192>" \
+            -gravity center \
+            -extent 192x192 \
+            -strip \
+            "$RES/mipmap-xxxhdpi/ic_launcher.png"
+
+          cp "$RES/mipmap-mdpi/ic_launcher.png" \
+             "$RES/mipmap-mdpi/ic_launcher_round.png"
+
+          cp "$RES/mipmap-hdpi/ic_launcher.png" \
+             "$RES/mipmap-hdpi/ic_launcher_round.png"
+
+          cp "$RES/mipmap-xhdpi/ic_launcher.png" \
+             "$RES/mipmap-xhdpi/ic_launcher_round.png"
+
+          cp "$RES/mipmap-xxhdpi/ic_launcher.png" \
+             "$RES/mipmap-xxhdpi/ic_launcher_round.png"
+
+          cp "$RES/mipmap-xxxhdpi/ic_launcher.png" \
+             "$RES/mipmap-xxxhdpi/ic_launcher_round.png"
+
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize "512x512>" \
+            -gravity center \
+            -extent 512x512 \
+            -strip \
+            "$RES/drawable-nodpi/ic_launcher_foreground.png"
 
           cat > "$RES/values/ic_launcher_background.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -93,63 +136,49 @@ workflows:
               <foreground android:drawable="@drawable/ic_launcher_foreground" />
           </adaptive-icon>
           EOF
-          cp "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
 
-          # Ícone de 512x512 para a ficha da loja (Play Console) e para anexar ao build.
-          # Fica fora de res/ de propósito: não deve ser empacotado no APK/AAB.
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 512x512 -gravity center -extent 512x512 -strip "$META/ic_launcher-playstore-512.png"
+          cp \
+            "$RES/mipmap-anydpi-v26/ic_launcher.xml" \
+            "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
 
-          echo "✔ Launcher criado em todas as densidades corretas (mdpi 48px até xxxhdpi 192px) + 512x512 para a loja em $META/."
+          echo "✔ Launcher criado."
 
-      - name: Gerar splash icon (todas as densidades, dentro da zona segura da Splash Screen API)
+      - name: Gerar splash transparente
         script: |
           set -e
+
           SRC="splash_icon.png"
-          RES="$MODULE_PATH/res"
+          OUT="$MODULE_PATH/res/drawable-nodpi/splash_icon.png"
 
           test -f "$SRC"
 
-          SRC_W=$(identify -format "%w" "$SRC")
-          SRC_H=$(identify -format "%h" "$SRC")
-          if [ "$SRC_W" -lt 288 ] || [ "$SRC_H" -lt 288 ]; then
-            echo "✘ splash_icon.png tem ${SRC_W}x${SRC_H}, menor que o mínimo recomendado de 288x288. Substitua o arquivo na raiz do repositório."
-            exit 1
-          fi
+          mkdir -p "$(dirname "$OUT")"
 
-          mkdir -p "$RES/drawable-mdpi" "$RES/drawable-hdpi" "$RES/drawable-xhdpi" "$RES/drawable-xxhdpi" "$RES/drawable-xxxhdpi"
+          magick "$SRC" \
+            -background none \
+            -alpha on \
+            -resize "512x512>" \
+            -gravity center \
+            -extent 512x512 \
+            -strip \
+            "$OUT"
 
-          # Mesmo motivo do launcher: remove qualquer splash_icon*.xml residual em
-          # qualquer pasta drawable* para não colidir com os splash_icon*.png novos.
-          find "$RES" -path "*/drawable*/splash_icon*.xml" -delete
-          rm -f "$RES/drawable/splash_icon.png"
-
-          # A Splash Screen API (Android 12+) reserva uma janela de até 240dp para o
-          # ícone animado, exibindo com segurança apenas os 160dp centrais; conteúdo
-          # fora disso pode ser cortado. Por isso a arte é redimensionada para caber
-          # em 160dp e centralizada dentro de um canvas de 240dp por densidade,
-          # exatamente como os splash screens nativos do Android esperam:
-          #   mdpi   = 1x  -> arte 160px  em canvas 240px
-          #   hdpi   = 1.5x -> arte 240px  em canvas 360px
-          #   xhdpi  = 2x  -> arte 320px  em canvas 480px
-          #   xxhdpi = 3x  -> arte 480px  em canvas 720px
-          #   xxxhdpi= 4x  -> arte 640px  em canvas 960px
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 160x160 -gravity center -extent 240x240 -strip "$RES/drawable-mdpi/splash_icon.png"
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 240x240 -gravity center -extent 360x360 -strip "$RES/drawable-hdpi/splash_icon.png"
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 320x320 -gravity center -extent 480x480 -strip "$RES/drawable-xhdpi/splash_icon.png"
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 480x480 -gravity center -extent 720x720 -strip "$RES/drawable-xxhdpi/splash_icon.png"
-          magick "$SRC" -background none -alpha on -filter Lanczos -resize 640x640 -gravity center -extent 960x960 -strip "$RES/drawable-xxxhdpi/splash_icon.png"
-
-          echo "✔ Splash criado em todas as densidades (arte contida na zona segura de 160dp dentro do canvas de 240dp)."
+          echo "✔ Splash transparente criado."
 
       - name: Configurar fundo do splash
         script: |
           set -e
-          mkdir -p "$MODULE_PATH/res/values" "$MODULE_PATH/res/values-night"
+
+          mkdir -p \
+            "$MODULE_PATH/res/values" \
+            "$MODULE_PATH/res/values-night"
+
           cat > "$MODULE_PATH/res/values/colors.xml" <<'EOF'
           <resources>
               <color name="splash_background">#FFFFFF</color>
           </resources>
           EOF
+
           cat > "$MODULE_PATH/res/values-night/colors.xml" <<'EOF'
           <resources>
               <color name="splash_background">#0D0D0D</color>
@@ -159,34 +188,51 @@ workflows:
       - name: Preparar Gradle
         script: |
           set -e
+
           chmod +x ./gradlew
+
           echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+
           ./gradlew --version
 
       - name: Build APK Release
         script: |
           set -e
-          ./gradlew clean assembleRelease --no-daemon --stacktrace
+
+          ./gradlew \
+            clean \
+            assembleRelease \
+            --no-daemon \
+            --stacktrace
 
       - name: Build AAB Release
         script: |
           set -e
-          ./gradlew bundleRelease --no-daemon --stacktrace
+
+          ./gradlew \
+            bundleRelease \
+            --no-daemon \
+            --stacktrace
 
       - name: Verificar artefatos
         script: |
           set -e
+
           echo "== APK =="
-          find app/build/outputs/apk/release -type f -name "*.apk" -print
+          find app/build/outputs/apk/release \
+            -type f \
+            -name "*.apk" \
+            -print
+
           echo "== AAB =="
-          find app/build/outputs/bundle/release -type f -name "*.aab" -print
-          echo "== Ícone 512x512 para a loja =="
-          find artifacts_meta -type f -name "*.png" -print
+          find app/build/outputs/bundle/release \
+            -type f \
+            -name "*.aab" \
+            -print
 
     artifacts:
       - app/build/outputs/apk/release/*.apk
       - app/build/outputs/bundle/release/*.aab
-      - artifacts_meta/*.png
 
     publishing:
       email:

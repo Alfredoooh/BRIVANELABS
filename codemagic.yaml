@@ -1,119 +1,203 @@
 workflows:
   scorezone-android-debug:
-    # Name displayed by Codemagic for this workflow.
+
+    # Nome exibido para este workflow no Codemagic.
     name: scorezone-android-debug
 
-    # Requested Apple Silicon free-tier machine. Codemagic currently documents
-    # mac_mini_m2 and 500 free macOS M2 build minutes/month for individual plans.
+    # Máquina Apple Silicon M2.
     instance_type: mac_mini_m2
 
-    # Maximum time allowed for one CI build.
+    # Tempo máximo de execução de uma build, em minutos.
     max_build_duration: 60
 
     environment:
-      # Android Gradle Plugin 8.2.x is run with Java 17 for reproducibility.
-      java: 17
 
+      # Variáveis públicas/não sensíveis do projeto.
       vars:
-        # Public project variable; do not put passwords/secrets here.
         PACKAGE_NAME: "com.brivanelabs.scorezone"
 
-      # Optional future secret variable group. Uncomment only after creating
-      # the group in Codemagic UI (for example for production signing secrets).
+      # Para utilizar variáveis secretas no futuro, crie um Environment
+      # Variable Group no Codemagic e descomente:
+      #
       # groups:
       #   - scorezone-production-signing
 
+      # Java 17 é usado pelo Android Gradle Plugin 8.2.x.
+      java: 17
+
+    # ---------------------------------------------------------------
+    # TRIGGERS
+    # ---------------------------------------------------------------
+    # O build pode sempre ser iniciado manualmente pela interface
+    # do Codemagic.
+    #
+    # Este bloco adiciona também build automático em PUSH na branch main.
+    #
+    # Para desativar builds automáticos, remova todo o bloco "triggering".
+    # Para reativá-los, mantenha o bloco abaixo e configure o webhook
+    # do repositório no painel do Codemagic.
     triggering:
-      # Pushes to main trigger automatic builds.
-      # A manual build can always be started from the Codemagic UI for this
-      # workflow; no separate YAML event is required for manual execution.
       events:
         - push
+
       branch_patterns:
         - pattern: main
           include: true
           source: true
-      # Cancel an older queued/running main build when a newer push arrives.
+
+      # Cancela builds antigos da mesma branch quando chega um push novo.
       cancel_previous_builds: true
 
+    # ---------------------------------------------------------------
+    # CACHE
+    # ---------------------------------------------------------------
+    # Mantém caches do Gradle entre builds para acelerar a compilação.
     cache:
-      # Gradle caches speed up dependency resolution and incremental work.
-      # Codemagic recommends caching ~/.gradle/caches rather than all ~/.gradle.
       cache_paths:
         - ~/.gradle/caches
         - ~/.gradle/wrapper/dists
 
+    # ---------------------------------------------------------------
+    # SCRIPTS
+    # ---------------------------------------------------------------
     scripts:
-      - name: Set up Android SDK local.properties
+
+      # O projeto não depende de Android Studio.
+      # O local.properties aponta o Gradle para o SDK disponível no
+      # ambiente do Codemagic.
+      - name: Configure Android SDK
         script: |
-          # The repository is deliberately Android-Studio-free. Gradle only
-          # needs the SDK path supplied by Codemagic's Android environment.
           echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
 
+      # -------------------------------------------------------------
+      # KEYSTORE
+      # -------------------------------------------------------------
+      # Este projeto de teste usa scorezone-debug.keystore versionado
+      # na raiz do repositório.
+      #
+      # Também existe suporte para um cenário futuro em que o keystore
+      # seja armazenado como variável secreta Base64:
+      #
+      # SCOREZONE_KEYSTORE_BASE64
+      #
+      # A primeira opção é usada automaticamente se o arquivo existir.
       - name: Set up signing keystore
         script: |
-          # Scenario A: personal debug keystore is committed to the repository.
           if [ -f "$CM_BUILD_DIR/scorezone-debug.keystore" ]; then
-            echo "Using scorezone-debug.keystore from the repository."
+            echo "Using repository keystore: scorezone-debug.keystore"
 
-          # Scenario B: future CI can inject the same keystore as a base64 secret.
           elif [ -n "${SCOREZONE_KEYSTORE_BASE64:-}" ]; then
             echo "Decoding SCOREZONE_KEYSTORE_BASE64..."
-            if printf '%s' "$SCOREZONE_KEYSTORE_BASE64" | base64 --decode > "$CM_BUILD_DIR/scorezone-debug.keystore" 2>/dev/null; then
+
+            if printf '%s' "$SCOREZONE_KEYSTORE_BASE64" | \
+              base64 --decode > "$CM_BUILD_DIR/scorezone-debug.keystore" 2>/dev/null
+            then
               :
             else
-              printf '%s' "$SCOREZONE_KEYSTORE_BASE64" | base64 -D > "$CM_BUILD_DIR/scorezone-debug.keystore"
+              printf '%s' "$SCOREZONE_KEYSTORE_BASE64" | \
+                base64 -D > "$CM_BUILD_DIR/scorezone-debug.keystore"
             fi
+
             chmod 600 "$CM_BUILD_DIR/scorezone-debug.keystore"
-            echo "Keystore decoded."
+
+            echo "Keystore decoded successfully."
 
           else
-            echo "ERROR: No debug keystore found and SCOREZONE_KEYSTORE_BASE64 is not set."
+            echo "ERROR: scorezone-debug.keystore was not found."
+            echo "ERROR: SCOREZONE_KEYSTORE_BASE64 is also not configured."
             exit 1
           fi
 
-      - name: Build debug APK
+      # -------------------------------------------------------------
+      # BUILD
+      # -------------------------------------------------------------
+      # Compila exatamente o APK Debug solicitado.
+      # --stacktrace deixa os erros do Gradle mais fáceis de diagnosticar.
+      - name: Build ScoreZone Debug APK
         script: |
-          # Stacktrace is intentionally enabled so failed CI builds expose the
-          # Gradle/Android/Kotlin failure point directly in the Codemagic log.
           chmod +x ./gradlew
           ./gradlew assembleDebug --stacktrace
 
+      # -------------------------------------------------------------
+      # APK SIZE CHECK
+      # -------------------------------------------------------------
+      # Limite absoluto:
+      # 400 KiB = 409600 bytes.
+      #
+      # macOS usa:
+      # stat -f%z arquivo
+      #
+      # O build falha explicitamente caso qualquer APK ultrapasse esse
+      # limite.
       - name: Verify APK size
         script: |
-          # First print the generated artifact and its human-readable size.
+          set -e
+
+          echo "Generated APK:"
           ls -lh app/build/outputs/apk/debug/*.apk
 
-          # Hard maximum: 400 KiB = 409600 bytes.
-          # This workflow runs on macOS, so stat uses -f%z rather than GNU -c%s.
           found_apk=false
-          while IFS= read -r -d '' apk; do
+
+          for apk in app/build/outputs/apk/debug/*.apk; do
+
+            if [ ! -f "$apk" ]; then
+              continue
+            fi
+
             found_apk=true
+
             bytes=$(stat -f%z "$apk")
-            echo "$apk = $bytes bytes"
+
+            kib=$((bytes / 1024))
+
+            echo "----------------------------------------"
+            echo "APK: $apk"
+            echo "Bytes: $bytes"
+            echo "Size: ${kib} KiB"
+            echo "Limit: 400 KiB"
+            echo "----------------------------------------"
+
             if [ "$bytes" -gt 409600 ]; then
-              echo "ERROR: APK exceeds the configured 400 KiB maximum."
+              echo "ERROR: APK exceeds 400 KiB."
+              echo "Build rejected."
               exit 1
             fi
-          done < <(find app/build/outputs/apk/debug -type f -name '*.apk' -print0)
+
+          done
 
           if [ "$found_apk" = false ]; then
-            echo "ERROR: No debug APK was produced."
+            echo "ERROR: No APK was generated."
             exit 1
           fi
 
-          echo "APK size gate passed."
+          echo "APK size check passed."
 
+    # ---------------------------------------------------------------
+    # ARTIFACTS
+    # ---------------------------------------------------------------
+    # O APK aparece na área de Artifacts do Codemagic para download.
     artifacts:
-      # Codemagic stores this APK as a build artifact for download.
       - app/build/outputs/apk/debug/*.apk
 
-    publishing:
-      # Email publishing is intentionally disabled for this personal/test build.
-      # Uncomment the following block later if build-result emails are desired.
-      # email:
-      #   recipients:
-      #     - alfredopjonas@gmail.com
-      #   notify:
-      #     success: true
-      #     failure: true
+    # ---------------------------------------------------------------
+    # PUBLISHING
+    # ---------------------------------------------------------------
+    # NÃO existe "publishing:" aqui propositalmente.
+    #
+    # Deixar:
+    #
+    # publishing:
+    #
+    # sem conteúdo gera o erro:
+    # "none is not an allowed value"
+    #
+    # Quando quiser ativar notificações por e-mail, substitua esta área
+    # por um bloco REAL, por exemplo:
+    #
+    # publishing:
+    #   email:
+    #     recipients:
+    #       - seu-email@example.com
+    #     notify:
+    #       success: true
+    #       failure: true

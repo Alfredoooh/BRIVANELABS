@@ -1,3 +1,4 @@
+<!-- app/src/main/res/values-night/colors.xml -->
 <resources>
     <color name="splash_background">#0D0D0D</color>
     <color name="splash_text">#F2F2F2</color>

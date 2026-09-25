@@ -1,4 +1,3 @@
-# codemagic.yaml — remove o bloco "Configurar fundo do splash" inteiro
 # codemagic.yaml
 workflows:
   brivane-notes-android:
@@ -42,6 +41,7 @@ workflows:
           rm -f "$RES/mipmap-mdpi/ic_launcher.xml" "$RES/mipmap-mdpi/ic_launcher_round.xml"
           rm -f "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
           rm -f "$RES/drawable/ic_launcher_foreground.xml"
+          rm -f "$RES/values/ic_launcher_background.xml"
           magick "$SRC" -background none -alpha on -resize "48x48>" -gravity center -extent 48x48 -strip "$RES/mipmap-mdpi/ic_launcher.png"
           magick "$SRC" -background none -alpha on -resize "72x72>" -gravity center -extent 72x72 -strip "$RES/mipmap-hdpi/ic_launcher.png"
           magick "$SRC" -background none -alpha on -resize "96x96>" -gravity center -extent 96x96 -strip "$RES/mipmap-xhdpi/ic_launcher.png"
@@ -53,12 +53,6 @@ workflows:
           cp "$RES/mipmap-xxhdpi/ic_launcher.png" "$RES/mipmap-xxhdpi/ic_launcher_round.png"
           cp "$RES/mipmap-xxxhdpi/ic_launcher.png" "$RES/mipmap-xxxhdpi/ic_launcher_round.png"
           magick "$SRC" -background none -alpha on -resize "512x512>" -gravity center -extent 512x512 -strip "$RES/drawable-nodpi/ic_launcher_foreground.png"
-          cat > "$RES/values/ic_launcher_background.xml" <<'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="ic_launcher_background">#FFFFFF</color>
-          </resources>
-          EOF
           cat > "$RES/mipmap-anydpi-v26/ic_launcher.xml" <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">

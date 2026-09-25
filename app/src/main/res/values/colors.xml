@@ -1,3 +1,4 @@
+<!-- app/src/main/res/values/colors.xml -->
 <resources>
     <color name="splash_background">#FFFFFF</color>
     <color name="splash_text">#1C1C1E</color>

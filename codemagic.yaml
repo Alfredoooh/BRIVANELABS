@@ -1,0 +1,119 @@
+workflows:
+  scorezone-android-debug:
+    # Name displayed by Codemagic for this workflow.
+    name: scorezone-android-debug
+
+    # Requested Apple Silicon free-tier machine. Codemagic currently documents
+    # mac_mini_m2 and 500 free macOS M2 build minutes/month for individual plans.
+    instance_type: mac_mini_m2
+
+    # Maximum time allowed for one CI build.
+    max_build_duration: 60
+
+    environment:
+      # Android Gradle Plugin 8.2.x is run with Java 17 for reproducibility.
+      java: 17
+
+      vars:
+        # Public project variable; do not put passwords/secrets here.
+        PACKAGE_NAME: "com.brivanelabs.scorezone"
+
+      # Optional future secret variable group. Uncomment only after creating
+      # the group in Codemagic UI (for example for production signing secrets).
+      # groups:
+      #   - scorezone-production-signing
+
+    triggering:
+      # Pushes to main trigger automatic builds.
+      # A manual build can always be started from the Codemagic UI for this
+      # workflow; no separate YAML event is required for manual execution.
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+      # Cancel an older queued/running main build when a newer push arrives.
+      cancel_previous_builds: true
+
+    cache:
+      # Gradle caches speed up dependency resolution and incremental work.
+      # Codemagic recommends caching ~/.gradle/caches rather than all ~/.gradle.
+      cache_paths:
+        - ~/.gradle/caches
+        - ~/.gradle/wrapper/dists
+
+    scripts:
+      - name: Set up Android SDK local.properties
+        script: |
+          # The repository is deliberately Android-Studio-free. Gradle only
+          # needs the SDK path supplied by Codemagic's Android environment.
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > "$CM_BUILD_DIR/local.properties"
+
+      - name: Set up signing keystore
+        script: |
+          # Scenario A: personal debug keystore is committed to the repository.
+          if [ -f "$CM_BUILD_DIR/scorezone-debug.keystore" ]; then
+            echo "Using scorezone-debug.keystore from the repository."
+
+          # Scenario B: future CI can inject the same keystore as a base64 secret.
+          elif [ -n "${SCOREZONE_KEYSTORE_BASE64:-}" ]; then
+            echo "Decoding SCOREZONE_KEYSTORE_BASE64..."
+            if printf '%s' "$SCOREZONE_KEYSTORE_BASE64" | base64 --decode > "$CM_BUILD_DIR/scorezone-debug.keystore" 2>/dev/null; then
+              :
+            else
+              printf '%s' "$SCOREZONE_KEYSTORE_BASE64" | base64 -D > "$CM_BUILD_DIR/scorezone-debug.keystore"
+            fi
+            chmod 600 "$CM_BUILD_DIR/scorezone-debug.keystore"
+            echo "Keystore decoded."
+
+          else
+            echo "ERROR: No debug keystore found and SCOREZONE_KEYSTORE_BASE64 is not set."
+            exit 1
+          fi
+
+      - name: Build debug APK
+        script: |
+          # Stacktrace is intentionally enabled so failed CI builds expose the
+          # Gradle/Android/Kotlin failure point directly in the Codemagic log.
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Verify APK size
+        script: |
+          # First print the generated artifact and its human-readable size.
+          ls -lh app/build/outputs/apk/debug/*.apk
+
+          # Hard maximum: 400 KiB = 409600 bytes.
+          # This workflow runs on macOS, so stat uses -f%z rather than GNU -c%s.
+          found_apk=false
+          while IFS= read -r -d '' apk; do
+            found_apk=true
+            bytes=$(stat -f%z "$apk")
+            echo "$apk = $bytes bytes"
+            if [ "$bytes" -gt 409600 ]; then
+              echo "ERROR: APK exceeds the configured 400 KiB maximum."
+              exit 1
+            fi
+          done < <(find app/build/outputs/apk/debug -type f -name '*.apk' -print0)
+
+          if [ "$found_apk" = false ]; then
+            echo "ERROR: No debug APK was produced."
+            exit 1
+          fi
+
+          echo "APK size gate passed."
+
+    artifacts:
+      # Codemagic stores this APK as a build artifact for download.
+      - app/build/outputs/apk/debug/*.apk
+
+    publishing:
+      # Email publishing is intentionally disabled for this personal/test build.
+      # Uncomment the following block later if build-result emails are desired.
+      # email:
+      #   recipients:
+      #     - alfredopjonas@gmail.com
+      #   notify:
+      #     success: true
+      #     failure: true

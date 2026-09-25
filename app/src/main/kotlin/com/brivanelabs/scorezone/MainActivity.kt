@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.Gravity
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
@@ -24,6 +25,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Button
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -46,6 +49,8 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
 
     private lateinit var webView: WebView
+    private lateinit var rootLayout: FrameLayout
+    private lateinit var reloadButton: Button
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
 
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
@@ -89,9 +94,11 @@ class MainActivity : ComponentActivity() {
         registerFileChooser()
         registerBackCallback()
         configureWebView()
+        configureReloadButton()
+        configureRootLayout()
         registerConnectivityReceiver()
 
-        setContentView(webView)
+        setContentView(rootLayout)
 
         /*
          * The site is intentionally loaded immediately.
@@ -163,7 +170,7 @@ class MainActivity : ComponentActivity() {
     private fun configureWebView() {
         webView = WebView(this)
 
-        webView.layoutParams = ViewGroup.LayoutParams(
+        webView.layoutParams = FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         )
@@ -250,6 +257,49 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * Creates the gray/white "Recarregar" button shown only on load failure,
+     * styled like old-fashioned system-default buttons (no icon, plain text).
+     */
+    private fun configureReloadButton() {
+        reloadButton = Button(this)
+        reloadButton.text = "Recarregar"
+        reloadButton.setTextColor(Color.WHITE)
+        reloadButton.setBackgroundColor(Color.parseColor("#5A5A5A"))
+        reloadButton.isAllCaps = false
+
+        val params = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        params.gravity = Gravity.CENTER
+
+        reloadButton.layoutParams = params
+        reloadButton.visibility = android.view.View.GONE
+
+        reloadButton.setOnClickListener {
+            reloadButton.visibility = android.view.View.GONE
+            webView.loadUrl(Config.TARGET_URL)
+        }
+    }
+
+    /**
+     * Root container stacking WebView and the reload button.
+     */
+    private fun configureRootLayout() {
+        rootLayout = FrameLayout(this)
+        rootLayout.layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
+        rootLayout.setBackgroundColor(
+            Color.parseColor(Config.DEFAULT_STATUS_BAR_COLOR)
+        )
+
+        rootLayout.addView(webView)
+        rootLayout.addView(reloadButton)
+    }
+
+    /**
      * Dedicated WebViewClient.
      */
     private fun createWebViewClient(): WebViewClient {
@@ -264,6 +314,14 @@ class MainActivity : ComponentActivity() {
                 )
             }
 
+            override fun onPageStarted(
+                view: WebView,
+                url: String?,
+                favicon: android.graphics.Bitmap?
+            ) {
+                reloadButton.visibility = android.view.View.GONE
+            }
+
             override fun onReceivedError(
                 view: WebView,
                 request: WebResourceRequest,
@@ -271,6 +329,7 @@ class MainActivity : ComponentActivity() {
             ) {
                 if (request.isForMainFrame) {
                     lastLoadHadError = true
+                    reloadButton.visibility = android.view.View.VISIBLE
                 }
             }
 
@@ -283,6 +342,7 @@ class MainActivity : ComponentActivity() {
                  * to the Activity.
                  */
                 lastLoadHadError = true
+                reloadButton.visibility = android.view.View.VISIBLE
                 return true
             }
         }
@@ -529,10 +589,6 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Creates the temporary output used by camera/video capture.
-     *
-     * IMPORTANT:
-     * This uses the fixed application FileProvider authority instead of
-     * BuildConfig, avoiding the BuildConfig generation dependency entirely.
      */
     private fun createCaptureIntent(
         action: String,
@@ -843,12 +899,6 @@ class MainActivity : ComponentActivity() {
 
         cleanupCaptureFile()
 
-        /*
-         * Do NOT assign webView.webViewClient = null.
-         *
-         * The WebViewClient property is non-null in the Kotlin API surface
-         * used by this project. Destroying the WebView is sufficient.
-         */
         webView.stopLoading()
         webView.webChromeClient = null
         webView.removeAllViews()

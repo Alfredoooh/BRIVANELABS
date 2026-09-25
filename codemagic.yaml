@@ -1,3 +1,4 @@
+# codemagic.yaml — remove o bloco "Configurar fundo do splash" inteiro
 # codemagic.yaml
 workflows:
   brivane-notes-android:
@@ -67,32 +68,6 @@ workflows:
           EOF
           cp "$RES/mipmap-anydpi-v26/ic_launcher.xml" "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
           echo "✔ Launcher criado."
-
-      - name: Gerar splash transparente
-        script: |
-          set -e
-          SRC="splash_icon.png"
-          OUT="$MODULE_PATH/res/drawable-nodpi/splash_icon.png"
-          test -f "$SRC"
-          mkdir -p "$(dirname "$OUT")"
-          rm -f "$MODULE_PATH/res/drawable/splash_icon.xml"
-          magick "$SRC" -background none -alpha on -resize "512x512>" -gravity center -extent 512x512 -strip "$OUT"
-          echo "✔ Splash transparente criado."
-
-      - name: Configurar fundo do splash
-        script: |
-          set -e
-          mkdir -p "$MODULE_PATH/res/values" "$MODULE_PATH/res/values-night"
-          cat > "$MODULE_PATH/res/values/colors.xml" <<'EOF'
-          <resources>
-              <color name="splash_background">#FFFFFF</color>
-          </resources>
-          EOF
-          cat > "$MODULE_PATH/res/values-night/colors.xml" <<'EOF'
-          <resources>
-              <color name="splash_background">#0D0D0D</color>
-          </resources>
-          EOF
 
       - name: Preparar Gradle
         script: |

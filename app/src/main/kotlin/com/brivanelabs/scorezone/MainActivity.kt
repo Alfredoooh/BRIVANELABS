@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.DownloadListener
 import android.webkit.URLUtil
@@ -37,9 +38,10 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The only Activity in ScoreZone. The entire visible UI is one WebView created
- * in Kotlin, without an XML layout, Compose, Material, Fragments or navigation
- * libraries.
+ * Single-Activity native Android WebView wrapper for ScoreZone.
+ *
+ * The Activity creates exactly one WebView programmatically.
+ * No XML layout, Compose, Material Components, Fragments or Navigation Component.
  */
 class MainActivity : ComponentActivity() {
 
@@ -51,15 +53,31 @@ class MainActivity : ComponentActivity() {
     private var cameraOutputFile: File? = null
     private var lastLoadHadError = false
 
+    /**
+     * Lightweight receiver used only to retry the WebView after connectivity
+     * returns following a main-frame loading error.
+     */
     private val connectivityReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (ConnectivityManager.CONNECTIVITY_ACTION == intent.action && !intent.getBooleanExtra(
+
+        override fun onReceive(
+            context: Context,
+            intent: Intent
+        ) {
+            if (
+                intent.action == ConnectivityManager.CONNECTIVITY_ACTION &&
+                !intent.getBooleanExtra(
                     ConnectivityManager.EXTRA_NO_CONNECTIVITY,
                     false
-                ) && lastLoadHadError
+                ) &&
+                lastLoadHadError
             ) {
                 lastLoadHadError = false
-                webView.post { webView.reload() }
+
+                if (::webView.isInitialized) {
+                    webView.post {
+                        webView.reload()
+                    }
+                }
             }
         }
     }
@@ -74,15 +92,40 @@ class MainActivity : ComponentActivity() {
         registerConnectivityReceiver()
 
         setContentView(webView)
+
+        /*
+         * The site is intentionally loaded immediately.
+         * There is no artificial splash delay, Handler, Thread.sleep or
+         * simulated loading period.
+         */
         webView.loadUrl(Config.TARGET_URL)
     }
 
+    /**
+     * Native defaults before the website calls window.Android.
+     */
     private fun configureSystemBars() {
-        window.statusBarColor = Color.parseColor(Config.DEFAULT_STATUS_BAR_COLOR)
-        window.navigationBarColor = Color.parseColor(Config.DEFAULT_NAVIGATION_BAR_COLOR)
-        WindowInsetsControllerCompat(window, window.decorView).isAppearanceLightStatusBars = false
+        window.statusBarColor =
+            Color.parseColor(
+                Config.DEFAULT_STATUS_BAR_COLOR
+            )
+
+        window.navigationBarColor =
+            Color.parseColor(
+                Config.DEFAULT_NAVIGATION_BAR_COLOR
+            )
+
+        WindowInsetsControllerCompat(
+            window,
+            window.decorView
+        ).isAppearanceLightStatusBars = false
     }
 
+    /**
+     * Modern Activity Result API.
+     *
+     * No deprecated onActivityResult implementation is used.
+     */
     private fun registerFileChooser() {
         fileChooserLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
@@ -91,53 +134,134 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Physical/gesture Android back behavior:
+     *
+     * 1. Navigate WebView history when possible.
+     * 2. Otherwise finish the Activity.
+     */
     private fun registerBackCallback() {
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                if (webView.canGoBack()) {
-                    webView.goBack()
-                } else {
-                    finish()
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+
+                override fun handleOnBackPressed() {
+
+                    if (webView.canGoBack()) {
+                        webView.goBack()
+                    } else {
+                        finish()
+                    }
                 }
             }
-        })
+        )
     }
 
+    /**
+     * Creates the only visual surface of the application: WebView.
+     */
     private fun configureWebView() {
         webView = WebView(this)
-        webView.layoutParams = android.view.ViewGroup.LayoutParams(
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT
+
+        webView.layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
         )
-        // Transparent while the page is still painting avoids introducing a native
-        // white/colored loading surface between the system launch window and site.
+
+        /*
+         * Transparent WebView background avoids introducing another solid
+         * loading surface between the transparent launch window and the site.
+         */
         webView.setBackgroundColor(Color.TRANSPARENT)
-        webView.overScrollMode = WebView.OVER_SCROLL_NEVER
+
+        webView.overScrollMode =
+            WebView.OVER_SCROLL_NEVER
 
         val settings = webView.settings
+
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
-        settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+        /*
+         * Normal WebView caching behavior. Web resources can be reused when
+         * appropriate while still allowing fresh network validation.
+         */
+        settings.cacheMode =
+            WebSettings.LOAD_DEFAULT
+
         settings.allowContentAccess = true
         settings.allowFileAccess = true
+
         settings.javaScriptCanOpenWindowsAutomatically = false
         settings.setSupportMultipleWindows(false)
         settings.mediaPlaybackRequiresUserGesture = true
 
-        CookieManager.getInstance().setAcceptCookie(true)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        CookieManager
+            .getInstance()
+            .setAcceptCookie(true)
+
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.LOLLIPOP
+        ) {
+            CookieManager
+                .getInstance()
+                .setAcceptThirdPartyCookies(
+                    webView,
+                    true
+                )
         }
 
-        webView.addJavascriptInterface(WebAppInterface(this), "Android")
+        /*
+         * JavaScript bridge:
+         *
+         * window.Android.setStatusBarColor(...)
+         * window.Android.setStatusBarLight(...)
+         * window.Android.setNavigationBarColor(...)
+         */
+        webView.addJavascriptInterface(
+            WebAppInterface(this),
+            "Android"
+        )
 
-        webView.webViewClient = object : WebViewClient() {
+        webView.webViewClient =
+            createWebViewClient()
+
+        webView.webChromeClient =
+            createWebChromeClient()
+
+        webView.setDownloadListener(
+            DownloadListener {
+                    url,
+                    userAgent,
+                    contentDisposition,
+                    mimeType,
+                    _ ->
+
+                enqueueDownload(
+                    url = url,
+                    userAgent = userAgent,
+                    contentDisposition = contentDisposition,
+                    mimeType = mimeType
+                )
+            }
+        )
+    }
+
+    /**
+     * Dedicated WebViewClient.
+     */
+    private fun createWebViewClient(): WebViewClient {
+        return object : WebViewClient() {
+
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: WebResourceRequest
             ): Boolean {
-                return routeUrl(request.url)
+                return routeUrl(
+                    request.url
+                )
             }
 
             override fun onReceivedError(
@@ -154,237 +278,579 @@ class MainActivity : ComponentActivity() {
                 view: WebView,
                 detail: android.webkit.RenderProcessGoneDetail
             ): Boolean {
-                // Returning true prevents the dead WebView renderer from taking down
-                // the Activity. The OS has already terminated that renderer process.
+                /*
+                 * Prevent a dead Chromium renderer from propagating the crash
+                 * to the Activity.
+                 */
                 lastLoadHadError = true
                 return true
             }
         }
+    }
 
-        webView.webChromeClient = object : WebChromeClient() {
+    /**
+     * Dedicated WebChromeClient.
+     */
+    private fun createWebChromeClient(): WebChromeClient {
+        return object : WebChromeClient() {
+
             override fun onShowFileChooser(
                 webView: WebView,
                 filePath: ValueCallback<Array<Uri>>,
                 fileChooserParams: FileChooserParams
             ): Boolean {
-                this@MainActivity.filePathCallback?.onReceiveValue(null)
-                this@MainActivity.filePathCallback = filePath
+
+                /*
+                 * Cancel any previous callback so JavaScript never receives
+                 * two competing file-selection callbacks.
+                 */
+                this@MainActivity.filePathCallback
+                    ?.onReceiveValue(null)
+
+                this@MainActivity.filePathCallback =
+                    filePath
 
                 return try {
-                    val intent = createFileChooserIntent(fileChooserParams)
-                    fileChooserLauncher.launch(intent)
+
+                    val chooserIntent =
+                        createFileChooserIntent(
+                            fileChooserParams
+                        )
+
+                    fileChooserLauncher.launch(
+                        chooserIntent
+                    )
+
                     true
+
                 } catch (_: Exception) {
-                    this@MainActivity.filePathCallback?.onReceiveValue(null)
-                    this@MainActivity.filePathCallback = null
+
+                    this@MainActivity.filePathCallback
+                        ?.onReceiveValue(null)
+
+                    this@MainActivity.filePathCallback =
+                        null
+
                     false
                 }
             }
         }
-
-        webView.setDownloadListener(
-            DownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-                enqueueDownload(url, userAgent, contentDisposition, mimeType)
-            }
-        )
     }
 
-    private fun routeUrl(uri: Uri): Boolean {
-        val targetHost = Uri.parse(Config.TARGET_URL).host
-        val requestedHost = uri.host
+    /**
+     * Keeps same-host HTTPS/HTTP navigation inside WebView.
+     *
+     * Any different host is delegated to the system browser.
+     */
+    private fun routeUrl(
+        uri: Uri
+    ): Boolean {
 
-        if (targetHost != null && requestedHost != null &&
-            targetHost.equals(requestedHost, ignoreCase = true) &&
-            (uri.scheme.equals("https", true) || uri.scheme.equals("http", true))
+        val targetHost =
+            Uri.parse(
+                Config.TARGET_URL
+            ).host
+
+        val requestedHost =
+            uri.host
+
+        val isSameHost =
+            targetHost != null &&
+                requestedHost != null &&
+                targetHost.equals(
+                    requestedHost,
+                    ignoreCase = true
+                )
+
+        val isWebScheme =
+            uri.scheme.equals(
+                "https",
+                ignoreCase = true
+            ) ||
+                uri.scheme.equals(
+                    "http",
+                    ignoreCase = true
+                )
+
+        if (
+            isSameHost &&
+            isWebScheme
         ) {
+            /*
+             * false = WebView handles this navigation.
+             */
             return false
         }
 
+        /*
+         * Different hosts are opened externally.
+         */
         return try {
-            startActivity(Intent(Intent.ACTION_VIEW, uri))
+
+            startActivity(
+                Intent(
+                    Intent.ACTION_VIEW,
+                    uri
+                )
+            )
+
             true
+
         } catch (_: Exception) {
-            Toast.makeText(this, "Nenhuma aplicação disponível para abrir este link.", Toast.LENGTH_SHORT)
-                .show()
+
+            Toast.makeText(
+                this,
+                "Nenhuma aplicação disponível para abrir este link.",
+                Toast.LENGTH_SHORT
+            ).show()
+
             true
         }
     }
 
-    private fun createFileChooserIntent(params: WebChromeClient.FileChooserParams): Intent {
-        val acceptTypes = params.acceptTypes
-            .flatMap { it.split(',') }
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
+    /**
+     * Builds the Android picker intent according to the website's
+     * <input type="file"> accept/capture parameters.
+     *
+     * Supports:
+     * - ordinary document/image/audio/video selection
+     * - multiple selection
+     * - camera capture
+     * - video capture
+     * - audio recording apps
+     */
+    private fun createFileChooserIntent(
+        params: WebChromeClient.FileChooserParams
+    ): Intent {
 
-        val mimeTypes = if (acceptTypes.isEmpty()) {
-            arrayOf("*/*")
-        } else {
-            acceptTypes.toTypedArray()
-        }
+        val acceptTypes =
+            params.acceptTypes
+                .flatMap { value ->
+                    value.split(',')
+                }
+                .map { value ->
+                    value.trim()
+                }
+                .filter { value ->
+                    value.isNotEmpty()
+                }
+                .distinct()
 
-        if (params.isCaptureEnabled && mimeTypes.size == 1) {
-            val mime = mimeTypes[0].lowercase(Locale.US)
+        val mimeTypes =
+            if (acceptTypes.isEmpty()) {
+                arrayOf("*/*")
+            } else {
+                acceptTypes.toTypedArray()
+            }
+
+        /*
+         * HTML capture="..." support.
+         */
+        if (
+            params.isCaptureEnabled &&
+            mimeTypes.size == 1
+        ) {
+
+            val mime =
+                mimeTypes[0]
+                    .lowercase(
+                        Locale.US
+                    )
+
             when {
+
                 mime.startsWith("image/") -> {
                     return createCaptureIntent(
-                        MediaStore.ACTION_IMAGE_CAPTURE,
-                        "image",
-                        ".jpg"
+                        action =
+                            MediaStore.ACTION_IMAGE_CAPTURE,
+                        prefix = "image",
+                        extension = ".jpg"
                     )
                 }
 
                 mime.startsWith("video/") -> {
                     return createCaptureIntent(
-                        MediaStore.ACTION_VIDEO_CAPTURE,
-                        "video",
-                        ".mp4"
+                        action =
+                            MediaStore.ACTION_VIDEO_CAPTURE,
+                        prefix = "video",
+                        extension = ".mp4"
                     )
                 }
 
                 mime.startsWith("audio/") -> {
                     return createCaptureIntent(
-                        MediaStore.Audio.Media.RECORD_SOUND_ACTION,
-                        "audio",
-                        ".m4a"
+                        action =
+                            MediaStore.Audio.Media.RECORD_SOUND_ACTION,
+                        prefix = "audio",
+                        extension = ".m4a"
                     )
                 }
             }
         }
 
-        return Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = if (mimeTypes.size == 1) mimeTypes[0] else "*/*"
+        /*
+         * Normal document provider.
+         */
+        return Intent(
+            Intent.ACTION_OPEN_DOCUMENT
+        ).apply {
+
+            addCategory(
+                Intent.CATEGORY_OPENABLE
+            )
+
+            type =
+                if (mimeTypes.size == 1) {
+                    mimeTypes[0]
+                } else {
+                    "*/*"
+                }
+
             if (mimeTypes.size > 1) {
-                putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+                putExtra(
+                    Intent.EXTRA_MIME_TYPES,
+                    mimeTypes
+                )
             }
-            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, params.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+
+            putExtra(
+                Intent.EXTRA_ALLOW_MULTIPLE,
+                params.mode ==
+                    WebChromeClient.FileChooserParams
+                        .MODE_OPEN_MULTIPLE
+            )
+
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            )
         }
     }
 
+    /**
+     * Creates the temporary output used by camera/video capture.
+     *
+     * IMPORTANT:
+     * This uses the fixed application FileProvider authority instead of
+     * BuildConfig, avoiding the BuildConfig generation dependency entirely.
+     */
     private fun createCaptureIntent(
         action: String,
         prefix: String,
         extension: String
     ): Intent {
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
-        val file = File(cacheDir, "${prefix}_${stamp}$extension")
-        val uri = FileProvider.getUriForFile(
-            this,
-            "${BuildConfig.APPLICATION_ID}.fileprovider",
-            file
-        )
+
+        val timestamp =
+            SimpleDateFormat(
+                "yyyyMMdd_HHmmss_SSS",
+                Locale.US
+            ).format(
+                Date()
+            )
+
+        val file =
+            File(
+                cacheDir,
+                "${prefix}_${timestamp}${extension}"
+            )
+
+        val uri =
+            FileProvider.getUriForFile(
+                this,
+                "com.brivanelabs.scorezone.fileprovider",
+                file
+            )
 
         cameraOutputFile = file
         cameraOutputUri = uri
 
         return Intent(action).apply {
-            putExtra(MediaStore.EXTRA_OUTPUT, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            clipData = ClipData.newRawUri("output", uri)
+
+            putExtra(
+                MediaStore.EXTRA_OUTPUT,
+                uri
+            )
+
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+
+            clipData =
+                ClipData.newRawUri(
+                    "output",
+                    uri
+                )
         }
     }
 
-    private fun deliverFileChooserResult(result: ActivityResult) {
-        val callback = filePathCallback ?: return
+    /**
+     * Completes the pending WebView file chooser callback.
+     */
+    private fun deliverFileChooserResult(
+        result: ActivityResult
+    ) {
+
+        val callback =
+            filePathCallback
+                ?: return
+
         filePathCallback = null
 
-        if (result.resultCode != RESULT_OK) {
+        /*
+         * User cancelled picker/camera.
+         */
+        if (
+            result.resultCode !=
+            RESULT_OK
+        ) {
+
             cleanupCaptureFile()
-            callback.onReceiveValue(null)
+
+            callback.onReceiveValue(
+                null
+            )
+
             return
         }
 
-        val captureUri = cameraOutputUri
+        /*
+         * Camera capture.
+         */
+        val captureUri =
+            cameraOutputUri
+
         if (captureUri != null) {
+
             cameraOutputUri = null
             cameraOutputFile = null
-            callback.onReceiveValue(arrayOf(captureUri))
+
+            callback.onReceiveValue(
+                arrayOf(
+                    captureUri
+                )
+            )
+
             return
         }
 
-        val data = result.data
-        val uris = extractUris(data)
-        callback.onReceiveValue(uris)
+        /*
+         * Normal document provider result.
+         */
+        callback.onReceiveValue(
+            extractUris(
+                result.data
+            )
+        )
     }
 
-    private fun extractUris(data: Intent?): Array<Uri>? {
-        if (data == null) return null
+    /**
+     * Extracts one or multiple selected documents.
+     */
+    private fun extractUris(
+        data: Intent?
+    ): Array<Uri>? {
 
-        val clipData = data.clipData
-        if (clipData != null && clipData.itemCount > 0) {
-            return Array(clipData.itemCount) { index -> clipData.getItemAt(index).uri }
+        if (data == null) {
+            return null
         }
 
-        return data.data?.let { arrayOf(it) }
+        val clipData =
+            data.clipData
+
+        if (
+            clipData != null &&
+            clipData.itemCount > 0
+        ) {
+
+            return Array(
+                clipData.itemCount
+            ) { index ->
+                clipData
+                    .getItemAt(index)
+                    .uri
+            }
+        }
+
+        return data.data?.let {
+            arrayOf(it)
+        }
     }
 
+    /**
+     * Cleans temporary capture files.
+     */
     private fun cleanupCaptureFile() {
-        cameraOutputUri = null
-        cameraOutputFile?.delete()
-        cameraOutputFile = null
+
+        cameraOutputUri =
+            null
+
+        cameraOutputFile
+            ?.delete()
+
+        cameraOutputFile =
+            null
     }
 
+    /**
+     * Sends a download to Android DownloadManager.
+     *
+     * The user gets the normal system download notification and the file is
+     * placed in the public Downloads directory.
+     */
     private fun enqueueDownload(
         url: String,
         userAgent: String?,
         contentDisposition: String?,
         mimeType: String?
     ) {
+
         try {
-            val request = DownloadManager.Request(Uri.parse(url))
-                .setNotificationVisibility(
-                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                )
-                .setDestinationInExternalPublicDir(
-                    Environment.DIRECTORY_DOWNLOADS,
-                    URLUtil.guessFileName(url, contentDisposition, mimeType)
-                )
-                .setMimeType(mimeType ?: "application/octet-stream")
-                .setTitle(URLUtil.guessFileName(url, contentDisposition, mimeType))
-                .setDescription("Download ScoreZone")
 
-            if (!userAgent.isNullOrBlank()) {
-                request.addRequestHeader("User-Agent", userAgent)
+            val fileName =
+                URLUtil.guessFileName(
+                    url,
+                    contentDisposition,
+                    mimeType
+                )
+
+            val request =
+                DownloadManager.Request(
+                    Uri.parse(url)
+                )
+                    .setNotificationVisibility(
+                        DownloadManager.Request
+                            .VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                    )
+                    .setDestinationInExternalPublicDir(
+                        Environment.DIRECTORY_DOWNLOADS,
+                        fileName
+                    )
+                    .setMimeType(
+                        mimeType
+                            ?: "application/octet-stream"
+                    )
+                    .setTitle(
+                        fileName
+                    )
+                    .setDescription(
+                        "Download ScoreZone"
+                    )
+
+            if (
+                !userAgent.isNullOrBlank()
+            ) {
+
+                request.addRequestHeader(
+                    "User-Agent",
+                    userAgent
+                )
             }
 
-            CookieManager.getInstance().getCookie(url)?.let { cookie ->
-                request.addRequestHeader("Cookie", cookie)
-            }
+            /*
+             * Preserve WebView cookies when the website requires an authenticated
+             * download endpoint.
+             */
+            CookieManager
+                .getInstance()
+                .getCookie(url)
+                ?.let { cookie ->
 
-            val downloadManager = getSystemService(DownloadManager::class.java)
-            downloadManager.enqueue(request)
+                    request.addRequestHeader(
+                        "Cookie",
+                        cookie
+                    )
+                }
+
+            val downloadManager =
+                getSystemService(
+                    DownloadManager::class.java
+                )
+
+            downloadManager.enqueue(
+                request
+            )
+
         } catch (_: Exception) {
-            Toast.makeText(this, "Não foi possível iniciar o download.", Toast.LENGTH_SHORT)
-                .show()
+
+            Toast.makeText(
+                this,
+                "Não foi possível iniciar o download.",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
+    /**
+     * Registers the legacy connectivity broadcast receiver because the
+     * application deliberately avoids adding a networking library.
+     */
     @Suppress("DEPRECATION")
     private fun registerConnectivityReceiver() {
-        val filter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(connectivityReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+
+        val filter =
+            IntentFilter(
+                ConnectivityManager.CONNECTIVITY_ACTION
+            )
+
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.TIRAMISU
+        ) {
+
+            registerReceiver(
+                connectivityReceiver,
+                filter,
+                Context.RECEIVER_NOT_EXPORTED
+            )
+
         } else {
-            registerReceiver(connectivityReceiver, filter)
+
+            registerReceiver(
+                connectivityReceiver,
+                filter
+            )
         }
     }
 
     override fun onDestroy() {
+
+        /*
+         * Stop receiving connectivity events.
+         */
         try {
-            unregisterReceiver(connectivityReceiver)
+
+            unregisterReceiver(
+                connectivityReceiver
+            )
+
         } catch (_: IllegalArgumentException) {
-            // Receiver was already unregistered or Activity teardown interrupted it.
+            /*
+             * Already unregistered or Activity teardown interrupted registration.
+             */
         }
 
-        filePathCallback?.onReceiveValue(null)
-        filePathCallback = null
+        /*
+         * Resolve any pending HTML file input callback.
+         */
+        filePathCallback
+            ?.onReceiveValue(
+                null
+            )
+
+        filePathCallback =
+            null
+
         cleanupCaptureFile()
 
+        /*
+         * Do NOT assign webView.webViewClient = null.
+         *
+         * The WebViewClient property is non-null in the Kotlin API surface
+         * used by this project. Destroying the WebView is sufficient.
+         */
         webView.stopLoading()
         webView.webChromeClient = null
-        webView.webViewClient = null
         webView.removeAllViews()
         webView.destroy()
 

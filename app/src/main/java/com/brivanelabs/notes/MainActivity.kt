@@ -92,7 +92,7 @@ class MainActivity : AppCompatActivity() {
                 captureUri != null && data?.data == null && data?.clipData == null -> arrayOf(captureUri)
                 data?.clipData != null -> {
                     val clip = data.clipData!!
-                    Array(clip.itemCount) { i -> clip.itemAt(i).uri }
+                    Array(clip.itemCount) { i -> clip.getItemAt(i).uri }
                 }
                 data?.data != null -> arrayOf(data.data!!)
                 captureUri != null -> arrayOf(captureUri)

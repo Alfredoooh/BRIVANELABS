@@ -1,5 +1,5 @@
 #!/bin/sh
-# ScoreZone self-bootstrapping Gradle launcher.
+# Looply self-bootstrapping Gradle launcher.
 # It uses the pinned distribution declared in gradle/wrapper/gradle-wrapper.properties.
 # This keeps ./gradlew usable even when the official wrapper JAR is not preinstalled.
 

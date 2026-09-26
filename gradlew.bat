@@ -1,7 +1,7 @@
 @ECHO OFF
 SETLOCAL ENABLEDELAYEDEXPANSION
 
-REM ScoreZone self-bootstrapping Gradle launcher.
+REM Looply self-bootstrapping Gradle launcher.
 REM It uses the pinned version in gradle/wrapper/gradle-wrapper.properties.
 
 SET "APP_HOME=%~dp0"

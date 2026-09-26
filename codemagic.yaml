@@ -1,8 +1,8 @@
 workflows:
-  scorezone-android-debug:
+  looply-android-debug:
 
     # Nome exibido para este workflow no Codemagic.
-    name: scorezone-android-debug
+    name: looply-android-debug
 
     # Máquina Apple Silicon M2.
     instance_type: mac_mini_m2
@@ -14,13 +14,13 @@ workflows:
 
       # Variáveis públicas/não sensíveis do projeto.
       vars:
-        PACKAGE_NAME: "com.brivanelabs.scorezone"
+        PACKAGE_NAME: "com.brivanlabs.looply"
 
       # Para utilizar variáveis secretas no futuro, crie um Environment
       # Variable Group no Codemagic e descomente:
       #
       # groups:
-      #   - scorezone-production-signing
+      #   - looply-production-signing
 
       # Java 17 é usado pelo Android Gradle Plugin 8.2.x.
       java: 17
@@ -72,39 +72,39 @@ workflows:
       # -------------------------------------------------------------
       # KEYSTORE
       # -------------------------------------------------------------
-      # Este projeto de teste usa scorezone-debug.keystore versionado
+      # Este projeto de teste usa looply-debug.keystore versionado
       # na raiz do repositório.
       #
       # Também existe suporte para um cenário futuro em que o keystore
       # seja armazenado como variável secreta Base64:
       #
-      # SCOREZONE_KEYSTORE_BASE64
+      # LOOPLY_KEYSTORE_BASE64
       #
       # A primeira opção é usada automaticamente se o arquivo existir.
       - name: Set up signing keystore
         script: |
-          if [ -f "$CM_BUILD_DIR/scorezone-debug.keystore" ]; then
-            echo "Using repository keystore: scorezone-debug.keystore"
+          if [ -f "$CM_BUILD_DIR/looply-debug.keystore" ]; then
+            echo "Using repository keystore: looply-debug.keystore"
 
-          elif [ -n "${SCOREZONE_KEYSTORE_BASE64:-}" ]; then
-            echo "Decoding SCOREZONE_KEYSTORE_BASE64..."
+          elif [ -n "${LOOPLY_KEYSTORE_BASE64:-}" ]; then
+            echo "Decoding LOOPLY_KEYSTORE_BASE64..."
 
-            if printf '%s' "$SCOREZONE_KEYSTORE_BASE64" | \
-              base64 --decode > "$CM_BUILD_DIR/scorezone-debug.keystore" 2>/dev/null
+            if printf '%s' "$LOOPLY_KEYSTORE_BASE64" | \
+              base64 --decode > "$CM_BUILD_DIR/looply-debug.keystore" 2>/dev/null
             then
               :
             else
-              printf '%s' "$SCOREZONE_KEYSTORE_BASE64" | \
-                base64 -D > "$CM_BUILD_DIR/scorezone-debug.keystore"
+              printf '%s' "$LOOPLY_KEYSTORE_BASE64" | \
+                base64 -D > "$CM_BUILD_DIR/looply-debug.keystore"
             fi
 
-            chmod 600 "$CM_BUILD_DIR/scorezone-debug.keystore"
+            chmod 600 "$CM_BUILD_DIR/looply-debug.keystore"
 
             echo "Keystore decoded successfully."
 
           else
-            echo "ERROR: scorezone-debug.keystore was not found."
-            echo "ERROR: SCOREZONE_KEYSTORE_BASE64 is also not configured."
+            echo "ERROR: looply-debug.keystore was not found."
+            echo "ERROR: LOOPLY_KEYSTORE_BASE64 is also not configured."
             exit 1
           fi
 
@@ -113,7 +113,7 @@ workflows:
       # -------------------------------------------------------------
       # Compila exatamente o APK Debug solicitado.
       # --stacktrace deixa os erros do Gradle mais fáceis de diagnosticar.
-      - name: Build ScoreZone Debug APK
+      - name: Build Looply Debug APK
         script: |
           chmod +x ./gradlew
           ./gradlew assembleDebug --stacktrace

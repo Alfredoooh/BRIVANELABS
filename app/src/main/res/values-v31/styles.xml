@@ -1,20 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.ScoreZone" parent="android:style/Theme.Material.Light.NoActionBar">
-        <!--
-            Android 12+ always inserts a system splash window on cold/warm start.
-            Replacing its icon with a transparent drawable and its background with
-            transparent is the lightest possible implementation without adding the
-            androidx.core:splashscreen dependency. No artificial delay is added.
-        -->
-        <item name="android:windowSplashScreenBackground">@drawable/splash_transparent</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_transparent</item>
-        <item name="android:windowBackground">@drawable/splash_transparent</item>
+    <style name="Theme.Looply" parent="android:style/Theme.Material.Light.NoActionBar">
+        <!-- Android 12+ system splash uses the processed transparent Looply icon. -->
+        <item name="android:windowSplashScreenBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
+        <item name="android:windowBackground">@color/splash_background</item>
         <item name="android:windowNoTitle">true</item>
         <item name="android:statusBarColor">#121212</item>
         <item name="android:navigationBarColor">#121212</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
-        <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>

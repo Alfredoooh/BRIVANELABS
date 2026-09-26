@@ -21,4 +21,4 @@ Thumbs.db
 captures/
 
 # Keystores are intentionally NOT ignored here.
-# This project explicitly versions scorezone-debug.keystore for its personal CI setup.
+# This project explicitly versions looply-debug.keystore for its personal CI setup.

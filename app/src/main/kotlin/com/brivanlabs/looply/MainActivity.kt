@@ -20,8 +20,6 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.MediaStore
 import android.view.ViewGroup
-import android.view.Window
-import android.view.WindowInsetsController
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
@@ -39,17 +37,18 @@ import androidx.activity.result.ActivityResult
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowInsetsControllerCompat
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /**
- * Single-Activity Looply WebView host.
+ * Single-Activity native Looply WebView host.
  *
- * The native layer intentionally contains no XML layout, no Compose, no
- * Material components, no fragments and no navigation library. The only
- * normal content surface is one WebView occupying the entire window.
+ * The application intentionally contains one Activity and one WebView.
+ * There is no Compose, Material Components, Fragment, Navigation Component,
+ * XML layout or external UI toolkit.
  */
 class MainActivity : ComponentActivity() {
 
@@ -98,7 +97,9 @@ class MainActivity : ComponentActivity() {
             ) {
                 lastLoadHadError = false
                 webView.post {
-                    webView.reload()
+                    if (!isFinishing && !isDestroyed) {
+                        webView.reload()
+                    }
                 }
             }
         }
@@ -118,15 +119,21 @@ class MainActivity : ComponentActivity() {
         webView.loadUrl(Config.TARGET_URL)
     }
 
+    /**
+     * Applies persisted colors before WebView creation so a returning user sees
+     * the same native surface while the website starts rendering.
+     */
     private fun applyStoredThemeBeforeWebView() {
         val statusColor = readColor(
             Config.PREF_STATUS_BAR,
             Config.DEFAULT_STATUS_BAR_COLOR
         )
+
         val navigationColor = readColor(
             Config.PREF_NAVIGATION_BAR,
             Config.DEFAULT_NAVIGATION_BAR_COLOR
         )
+
         val splashColor = readColor(
             Config.PREF_SPLASH,
             defaultSplashForSystemTheme()
@@ -138,13 +145,14 @@ class MainActivity : ComponentActivity() {
             ColorDrawable(splashColor)
         )
 
-        applyStatusBarLight(
+        updateStatusBarLight(
             preferences.getBoolean(
                 Config.PREF_STATUS_LIGHT,
                 false
             )
         )
-        applyNavigationBarLight(
+
+        updateNavigationBarLight(
             preferences.getBoolean(
                 Config.PREF_NAVIGATION_LIGHT,
                 false
@@ -153,11 +161,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun defaultSplashForSystemTheme(): String {
-        return if (
+        val isNight =
             (resources.configuration.uiMode and
                 android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-            android.content.res.Configuration.UI_MODE_NIGHT_YES
-        ) {
+                android.content.res.Configuration.UI_MODE_NIGHT_YES
+
+        return if (isNight) {
             "#0D0F12"
         } else {
             "#FFFFFF"
@@ -185,7 +194,7 @@ class MainActivity : ComponentActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    if (webView.canGoBack()) {
+                    if (::webView.isInitialized && webView.canGoBack()) {
                         webView.goBack()
                     } else {
                         finish()
@@ -197,10 +206,12 @@ class MainActivity : ComponentActivity() {
 
     private fun configureWebView() {
         webView = WebView(this)
+
         webView.layoutParams = ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT
         )
+
         webView.setBackgroundColor(Color.TRANSPARENT)
         webView.overScrollMode = WebView.OVER_SCROLL_NEVER
 
@@ -217,6 +228,7 @@ class MainActivity : ComponentActivity() {
         settings.setGeolocationEnabled(true)
 
         CookieManager.getInstance().setAcceptCookie(true)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             CookieManager.getInstance()
                 .setAcceptThirdPartyCookies(webView, true)
@@ -242,6 +254,7 @@ class MainActivity : ComponentActivity() {
 
     private fun createWebViewClient(): WebViewClient {
         return object : WebViewClient() {
+
             override fun shouldOverrideUrlLoading(
                 view: WebView,
                 request: WebResourceRequest
@@ -258,19 +271,12 @@ class MainActivity : ComponentActivity() {
                     lastLoadHadError = true
                 }
             }
-
-            override fun onRenderProcessGone(
-                view: WebView,
-                detail: android.webkit.RenderProcessGoneDetail
-            ): Boolean {
-                lastLoadHadError = true
-                return true
-            }
         }
     }
 
     private fun createWebChromeClient(): WebChromeClient {
         return object : WebChromeClient() {
+
             override fun onShowFileChooser(
                 view: WebView,
                 filePath: ValueCallback<Array<Uri>>,
@@ -324,12 +330,15 @@ class MainActivity : ComponentActivity() {
 
     private fun routeUrl(uri: Uri): Boolean {
         val scheme = uri.scheme?.lowercase(Locale.US)
+
         if (scheme == "http" || scheme == "https") {
             val targetHost = Uri.parse(Config.TARGET_URL).host
             val requestedHost = uri.host
-            val sameHost = targetHost != null &&
-                requestedHost != null &&
-                targetHost.equals(requestedHost, true)
+
+            val sameHost =
+                targetHost != null &&
+                    requestedHost != null &&
+                    targetHost.equals(requestedHost, true)
 
             if (sameHost) {
                 return false
@@ -375,40 +384,60 @@ class MainActivity : ComponentActivity() {
 
         if (params.isCaptureEnabled && mimeTypes.size == 1) {
             when (val mime = mimeTypes[0].lowercase(Locale.US)) {
-                in listOf("image/*", "image/jpeg", "image/png", "image/webp") -> {
+                "image/*",
+                "image/jpeg",
+                "image/png",
+                "image/webp" -> {
                     return createCaptureIntent(
                         MediaStore.ACTION_IMAGE_CAPTURE,
                         "image",
                         ".jpg"
                     )
                 }
-                in listOf("video/*", "video/mp4", "video/webm") -> {
+
+                "video/*",
+                "video/mp4",
+                "video/webm" -> {
                     return createCaptureIntent(
                         MediaStore.ACTION_VIDEO_CAPTURE,
                         "video",
                         ".mp4"
                     )
                 }
-                in listOf("audio/*", "audio/mp4", "audio/mpeg", "audio/webm") -> {
+
+                "audio/*",
+                "audio/mp4",
+                "audio/mpeg",
+                "audio/webm" -> {
                     return Intent(
                         MediaStore.Audio.Media.RECORD_SOUND_ACTION
                     )
                 }
-                else -> Unit
             }
         }
 
         return Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = if (mimeTypes.size == 1) mimeTypes[0] else "*/*"
-            if (mimeTypes.size > 1) {
-                putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+
+            type = if (mimeTypes.size == 1) {
+                mimeTypes[0]
+            } else {
+                "*/*"
             }
+
+            if (mimeTypes.size > 1) {
+                putExtra(
+                    Intent.EXTRA_MIME_TYPES,
+                    mimeTypes
+                )
+            }
+
             putExtra(
                 Intent.EXTRA_ALLOW_MULTIPLE,
                 params.mode ==
                     WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
             )
+
             addFlags(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
                     Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
@@ -446,11 +475,16 @@ class MainActivity : ComponentActivity() {
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
                     Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
-            clipData = ClipData.newRawUri("output", uri)
+            clipData = ClipData.newRawUri(
+                "output",
+                uri
+            )
         }
     }
 
-    private fun deliverFileChooserResult(result: ActivityResult) {
+    private fun deliverFileChooserResult(
+        result: ActivityResult
+    ) {
         val callback = filePathCallback ?: return
         filePathCallback = null
 
@@ -461,6 +495,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val captureUri = cameraOutputUri
+
         if (captureUri != null) {
             cameraOutputUri = null
             cameraOutputFile = null
@@ -468,13 +503,18 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        callback.onReceiveValue(extractUris(result.data))
+        callback.onReceiveValue(
+            extractUris(result.data)
+        )
     }
 
     private fun extractUris(data: Intent?): Array<Uri>? {
-        if (data == null) return null
+        if (data == null) {
+            return null
+        }
 
         val clipData = data.clipData
+
         if (clipData != null && clipData.itemCount > 0) {
             return Array(clipData.itemCount) { index ->
                 clipData.getItemAt(index).uri
@@ -488,6 +528,18 @@ class MainActivity : ComponentActivity() {
         request: PermissionRequest
     ) {
         if (isFinishing || isDestroyed) {
+            request.deny()
+            return
+        }
+
+        val targetHost = Uri.parse(Config.TARGET_URL).host
+        val requestedHost = request.origin?.host
+
+        if (
+            targetHost == null ||
+            requestedHost == null ||
+            !targetHost.equals(requestedHost, true)
+        ) {
             request.deny()
             return
         }
@@ -518,10 +570,15 @@ class MainActivity : ComponentActivity() {
 
         pendingWebPermissionRequest = request
         pendingPermissionFlow = PermissionFlow.WEB_RESOURCE
-        permissionLauncher.launch(permissions.distinct().toTypedArray())
+
+        permissionLauncher.launch(
+            permissions.distinct().toTypedArray()
+        )
     }
 
-    private fun grantWebRequest(request: PermissionRequest) {
+    private fun grantWebRequest(
+        request: PermissionRequest
+    ) {
         val grantedResources = request.resources.filter { resource ->
             when (resource) {
                 PermissionRequest.RESOURCE_VIDEO_CAPTURE ->
@@ -547,19 +604,29 @@ class MainActivity : ComponentActivity() {
         origin: String,
         callback: GeolocationPermissions.Callback
     ) {
+        if (isFinishing || isDestroyed) {
+            callback.invoke(origin, false, false)
+            return
+        }
+
+        val targetHost = Uri.parse(Config.TARGET_URL).host
+        val requestedHost = Uri.parse(origin).host
+
+        if (
+            targetHost == null ||
+            requestedHost == null ||
+            !targetHost.equals(requestedHost, true)
+        ) {
+            callback.invoke(origin, false, false)
+            return
+        }
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             callback.invoke(origin, true, false)
             return
         }
 
-        val fineGranted =
-            checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
-        val coarseGranted =
-            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
-                PackageManager.PERMISSION_GRANTED
-
-        if (fineGranted || coarseGranted) {
+        if (hasLocationPermission()) {
             callback.invoke(origin, true, false)
             return
         }
@@ -582,22 +649,34 @@ class MainActivity : ComponentActivity() {
         when (pendingPermissionFlow) {
             PermissionFlow.WEB_RESOURCE -> {
                 pendingWebPermissionRequest?.let { request ->
-                    grantWebRequest(request)
+                    if (!isFinishing && !isDestroyed) {
+                        grantWebRequest(request)
+                    } else {
+                        request.deny()
+                    }
                 }
+
                 pendingWebPermissionRequest = null
             }
 
             PermissionFlow.GEOLOCATION -> {
                 val origin = pendingGeoOrigin
                 val callback = pendingGeoCallback
+
                 pendingGeoOrigin = null
                 pendingGeoCallback = null
 
                 if (origin != null && callback != null) {
-                    val granted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-                        result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
-                        hasLocationPermission()
-                    callback.invoke(origin, granted, false)
+                    val granted =
+                        result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                            result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
+                            hasLocationPermission()
+
+                    callback.invoke(
+                        origin,
+                        granted,
+                        false
+                    )
                 }
             }
 
@@ -609,29 +688,54 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun hasLocationPermission(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
-        return checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED ||
-            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return true
+        }
+
+        return checkSelfPermission(
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
     }
 
-    fun requestNativePermissions(kind: String) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+    fun requestNativePermissions(
+        kind: String
+    ) {
+        if (
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            isFinishing ||
+            isDestroyed
+        ) {
+            return
+        }
 
         val requested = when (kind.lowercase(Locale.US)) {
-            "camera" -> arrayOf(Manifest.permission.CAMERA)
-            "microphone", "mic", "audio" -> arrayOf(Manifest.permission.RECORD_AUDIO)
-            "location", "gps" -> arrayOf(
+            "camera" -> arrayOf(
+                Manifest.permission.CAMERA
+            )
+
+            "microphone",
+            "mic",
+            "audio" -> arrayOf(
+                Manifest.permission.RECORD_AUDIO
+            )
+
+            "location",
+            "gps" -> arrayOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION
             )
-            "all", "media" -> arrayOf(
+
+            "all",
+            "media" -> arrayOf(
                 Manifest.permission.CAMERA,
                 Manifest.permission.RECORD_AUDIO,
                 Manifest.permission.ACCESS_FINE_LOCATION,
                 Manifest.permission.ACCESS_COARSE_LOCATION
             )
+
             else -> emptyArray()
         }
 
@@ -641,7 +745,9 @@ class MainActivity : ComponentActivity() {
 
         if (missing.isNotEmpty()) {
             pendingPermissionFlow = PermissionFlow.NATIVE_REQUEST
-            permissionLauncher.launch(missing.toTypedArray())
+            permissionLauncher.launch(
+                missing.toTypedArray()
+            )
         }
     }
 
@@ -658,29 +764,43 @@ class MainActivity : ComponentActivity() {
                 mimeType
             )
 
-            val request = DownloadManager.Request(Uri.parse(url))
+            val request = DownloadManager.Request(
+                Uri.parse(url)
+            )
                 .setNotificationVisibility(
-                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                    DownloadManager.Request
+                        .VISIBILITY_VISIBLE_NOTIFY_COMPLETED
                 )
                 .setDestinationInExternalPublicDir(
                     Environment.DIRECTORY_DOWNLOADS,
                     fileName
                 )
-                .setMimeType(mimeType ?: "application/octet-stream")
+                .setMimeType(
+                    mimeType ?: "application/octet-stream"
+                )
                 .setTitle(fileName)
                 .setDescription("Download Looply")
 
             if (!userAgent.isNullOrBlank()) {
-                request.addRequestHeader("User-Agent", userAgent)
+                request.addRequestHeader(
+                    "User-Agent",
+                    userAgent
+                )
             }
 
             CookieManager.getInstance()
                 .getCookie(url)
                 ?.let { cookie ->
-                    request.addRequestHeader("Cookie", cookie)
+                    request.addRequestHeader(
+                        "Cookie",
+                        cookie
+                    )
                 }
 
-            getSystemService(DownloadManager::class.java).enqueue(request)
+            getSystemService(
+                DownloadManager::class.java
+            ).enqueue(request)
+
         } catch (_: Exception) {
             Toast.makeText(
                 this,
@@ -690,56 +810,60 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun applyStatusBarLight(isLight: Boolean) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val controller = window.insetsController ?: return
-            val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-            controller.setSystemBarsAppearance(
-                if (isLight) mask else 0,
-                mask
-            )
-        } else {
-            var flags = window.decorView.systemUiVisibility
-            val mask = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-            flags = if (isLight) flags or mask else flags and mask.inv()
-            window.decorView.systemUiVisibility = flags
-        }
+    private fun applyStatusBarLight(
+        isLight: Boolean
+    ) {
+        WindowInsetsControllerCompat(
+            window,
+            window.decorView
+        ).isAppearanceLightStatusBars = isLight
     }
 
-    private fun applyNavigationBarLight(isLight: Boolean) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val controller = window.insetsController ?: return
-            val mask = WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            controller.setSystemBarsAppearance(
-                if (isLight) mask else 0,
-                mask
-            )
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            var flags = window.decorView.systemUiVisibility
-            val mask = android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-            flags = if (isLight) flags or mask else flags and mask.inv()
-            window.decorView.systemUiVisibility = flags
-        }
+    private fun applyNavigationBarLight(
+        isLight: Boolean
+    ) {
+        WindowInsetsControllerCompat(
+            window,
+            window.decorView
+        ).isAppearanceLightNavigationBars = isLight
     }
 
-    fun updateStatusBarColor(color: Int) {
+    fun updateStatusBarColor(
+        color: Int
+    ) {
         preferences.edit()
-            .putInt(Config.PREF_STATUS_BAR, color)
+            .putInt(
+                Config.PREF_STATUS_BAR,
+                color
+            )
             .apply()
+
         window.statusBarColor = color
     }
 
-    fun updateNavigationBarColor(color: Int) {
+    fun updateNavigationBarColor(
+        color: Int
+    ) {
         preferences.edit()
-            .putInt(Config.PREF_NAVIGATION_BAR, color)
+            .putInt(
+                Config.PREF_NAVIGATION_BAR,
+                color
+            )
             .apply()
+
         window.navigationBarColor = color
     }
 
-    fun updateSplashColor(color: Int) {
+    fun updateSplashColor(
+        color: Int
+    ) {
         preferences.edit()
-            .putInt(Config.PREF_SPLASH, color)
+            .putInt(
+                Config.PREF_SPLASH,
+                color
+            )
             .apply()
+
         window.setBackgroundDrawable(
             ColorDrawable(color)
         )
@@ -751,8 +875,11 @@ class MainActivity : ComponentActivity() {
     ) {
         val base = preferences.getInt(
             Config.PREF_STATUS_BAR,
-            Color.parseColor(Config.DEFAULT_STATUS_BAR_COLOR)
+            Color.parseColor(
+                Config.DEFAULT_STATUS_BAR_COLOR
+            )
         )
+
         window.statusBarColor = if (enabled) {
             dimColor(base, amount)
         } else {
@@ -766,8 +893,11 @@ class MainActivity : ComponentActivity() {
     ) {
         val base = preferences.getInt(
             Config.PREF_NAVIGATION_BAR,
-            Color.parseColor(Config.DEFAULT_NAVIGATION_BAR_COLOR)
+            Color.parseColor(
+                Config.DEFAULT_NAVIGATION_BAR_COLOR
+            )
         )
+
         window.navigationBarColor = if (enabled) {
             dimColor(base, amount)
         } else {
@@ -775,62 +905,100 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun updateThemeMode(mode: String) {
+    fun updateThemeMode(
+        mode: String
+    ) {
         val normalized = mode.lowercase(Locale.US)
 
         preferences.edit()
-            .putString(Config.PREF_THEME_MODE, normalized)
+            .putString(
+                Config.PREF_THEME_MODE,
+                normalized
+            )
             .apply()
 
         when (normalized) {
-            "light" -> applyThemePreset(light = true)
-            "dark" -> applyThemePreset(light = false)
+            "light" -> applyThemePreset(true)
+            "dark" -> applyThemePreset(false)
+
             "system" -> {
-                val night =
+                val isNight =
                     (resources.configuration.uiMode and
                         android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
                         android.content.res.Configuration.UI_MODE_NIGHT_YES
-                applyThemePreset(light = !night)
+
+                applyThemePreset(!isNight)
             }
         }
     }
 
-    private fun applyThemePreset(light: Boolean) {
+    private fun applyThemePreset(
+        light: Boolean
+    ) {
         if (light) {
             updateSplashColor(Color.WHITE)
-            updateStatusBarColor(Color.rgb(242, 242, 247))
+            updateStatusBarColor(
+                Color.rgb(242, 242, 247)
+            )
             updateNavigationBarColor(Color.WHITE)
             updateStatusBarLight(true)
             updateNavigationBarLight(true)
         } else {
-            updateSplashColor(Color.rgb(13, 15, 18))
-            updateStatusBarColor(Color.rgb(18, 18, 18))
-            updateNavigationBarColor(Color.rgb(18, 18, 18))
+            updateSplashColor(
+                Color.rgb(13, 15, 18)
+            )
+            updateStatusBarColor(
+                Color.rgb(18, 18, 18)
+            )
+            updateNavigationBarColor(
+                Color.rgb(18, 18, 18)
+            )
             updateStatusBarLight(false)
             updateNavigationBarLight(false)
         }
     }
 
-    private fun updateStatusBarLight(isLight: Boolean) {
+    fun updateStatusBarLight(
+        isLight: Boolean
+    ) {
         preferences.edit()
-            .putBoolean(Config.PREF_STATUS_LIGHT, isLight)
+            .putBoolean(
+                Config.PREF_STATUS_LIGHT,
+                isLight
+            )
             .apply()
+
         applyStatusBarLight(isLight)
     }
 
-    private fun updateNavigationBarLight(isLight: Boolean) {
+    fun updateNavigationBarLight(
+        isLight: Boolean
+    ) {
         preferences.edit()
-            .putBoolean(Config.PREF_NAVIGATION_LIGHT, isLight)
+            .putBoolean(
+                Config.PREF_NAVIGATION_LIGHT,
+                isLight
+            )
             .apply()
+
         applyNavigationBarLight(isLight)
     }
 
-    fun requestKeepScreenOn(keepOn: Boolean) {
-        webView.keepScreenOn = keepOn
+    fun requestKeepScreenOn(
+        keepOn: Boolean
+    ) {
+        if (::webView.isInitialized) {
+            webView.keepScreenOn = keepOn
+        }
     }
 
-    fun copyToClipboard(text: String) {
-        val clipboard = getSystemService(ClipboardManager::class.java)
+    fun copyToClipboard(
+        text: String
+    ) {
+        val clipboard = getSystemService(
+            ClipboardManager::class.java
+        )
+
         clipboard.setPrimaryClip(
             ClipData.newPlainText(
                 "Looply",
@@ -839,21 +1007,42 @@ class MainActivity : ComponentActivity() {
         )
     }
 
-    fun shareText(text: String, title: String) {
-        startActivity(
-            Intent.createChooser(
-                Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, text)
-                },
-                title.ifBlank { "Partilhar" }
+    fun shareText(
+        text: String,
+        title: String
+    ) {
+        try {
+            startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(
+                            Intent.EXTRA_TEXT,
+                            text
+                        )
+                    },
+                    title.ifBlank {
+                        "Partilhar"
+                    }
+                )
             )
-        )
+        } catch (_: Exception) {
+            // No share handler is available.
+        }
     }
 
-    fun vibrate(milliseconds: Long) {
-        val safeDuration = milliseconds.coerceIn(1L, 1000L)
-        val vibrator = getSystemService(Vibrator::class.java)
+    fun vibrate(
+        milliseconds: Long
+    ) {
+        val safeDuration = milliseconds.coerceIn(
+            1L,
+            1000L
+        )
+
+        val vibrator = getSystemService(
+            Vibrator::class.java
+        )
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             vibrator?.vibrate(
                 VibrationEffect.createOneShot(
@@ -867,7 +1056,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun openExternalUrl(url: String) {
+    fun openExternalUrl(
+        url: String
+    ) {
         try {
             startActivity(
                 Intent(
@@ -886,7 +1077,11 @@ class MainActivity : ComponentActivity() {
         color: Int,
         amount: Float
     ): Int {
-        val factor = 1f - amount.coerceIn(0f, 0.65f)
+        val factor = 1f - amount.coerceIn(
+            0f,
+            0.65f
+        )
+
         return Color.rgb(
             (Color.red(color) * factor).toInt(),
             (Color.green(color) * factor).toInt(),
@@ -898,8 +1093,16 @@ class MainActivity : ComponentActivity() {
         key: String,
         fallback: String
     ): Int {
-        val defaultColor = Color.parseColor(fallback)
-        return preferences.getInt(key, defaultColor)
+        return if (
+            preferences.contains(key)
+        ) {
+            preferences.getInt(
+                key,
+                Color.parseColor(fallback)
+            )
+        } else {
+            Color.parseColor(fallback)
+        }
     }
 
     private fun cleanupCaptureFile() {
@@ -908,48 +1111,37 @@ class MainActivity : ComponentActivity() {
         cameraOutputFile = null
     }
 
-    @Suppress("DEPRECATION")
-    private fun registerConnectivityReceiver() {
-        val filter = IntentFilter(
-            ConnectivityManager.CONNECTIVITY_ACTION
-        )
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(
-                connectivityReceiver,
-                filter,
-                Context.RECEIVER_NOT_EXPORTED
+    private fun unregisterConnectivityReceiverSafely() {
+        try {
+            unregisterReceiver(
+                connectivityReceiver
             )
-        } else {
-            registerReceiver(
-                connectivityReceiver,
-                filter
-            )
+        } catch (_: IllegalArgumentException) {
+            // Already unregistered.
         }
     }
 
     override fun onDestroy() {
-        try {
-            unregisterReceiver(connectivityReceiver)
-        } catch (_: IllegalArgumentException) {
-            // Already unregistered.
-        }
+        unregisterConnectivityReceiverSafely()
 
         pendingWebPermissionRequest?.deny()
         pendingWebPermissionRequest = null
+
         pendingGeoCallback = null
         pendingGeoOrigin = null
         pendingPermissionFlow = PermissionFlow.NONE
 
         filePathCallback?.onReceiveValue(null)
         filePathCallback = null
+
         cleanupCaptureFile()
 
-        webView.stopLoading()
-        webView.webChromeClient = null
-        webView.removeJavascriptInterface("Android")
-        webView.removeAllViews()
-        webView.destroy()
+        if (::webView.isInitialized) {
+            webView.stopLoading()
+            webView.webChromeClient = null
+            webView.removeAllViews()
+            webView.destroy()
+        }
 
         super.onDestroy()
     }

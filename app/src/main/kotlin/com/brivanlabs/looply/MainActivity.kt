@@ -83,15 +83,15 @@ class MainActivity : ComponentActivity() {
 
     private val connectivityReceiver = object : BroadcastReceiver() {
         override fun onReceive(
-            context: Context,
-            intent: Intent
+            context: Context?,
+            intent: Intent?
         ) {
             if (
-                intent.action == ConnectivityManager.CONNECTIVITY_ACTION &&
-                !intent.getBooleanExtra(
+                intent?.action == ConnectivityManager.CONNECTIVITY_ACTION &&
+                intent.getBooleanExtra(
                     ConnectivityManager.EXTRA_NO_CONNECTIVITY,
                     false
-                ) &&
+                ).not() &&
                 lastLoadHadError &&
                 ::webView.isInitialized
             ) {
@@ -256,18 +256,19 @@ class MainActivity : ComponentActivity() {
         return object : WebViewClient() {
 
             override fun shouldOverrideUrlLoading(
-                view: WebView,
-                request: WebResourceRequest
+                view: WebView?,
+                request: WebResourceRequest?
             ): Boolean {
-                return routeUrl(request.url)
+                val uri = request?.url ?: return false
+                return routeUrl(uri)
             }
 
             override fun onReceivedError(
-                view: WebView,
-                request: WebResourceRequest,
-                error: WebResourceError
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: WebResourceError?
             ) {
-                if (request.isForMainFrame) {
+                if (request?.isForMainFrame == true) {
                     lastLoadHadError = true
                 }
             }
@@ -278,10 +279,14 @@ class MainActivity : ComponentActivity() {
         return object : WebChromeClient() {
 
             override fun onShowFileChooser(
-                view: WebView,
-                filePath: ValueCallback<Array<Uri>>,
-                fileChooserParams: FileChooserParams
+                view: WebView?,
+                filePath: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
             ): Boolean {
+                if (filePath == null || fileChooserParams == null) {
+                    return false
+                }
+
                 this@MainActivity.filePathCallback?.onReceiveValue(null)
                 this@MainActivity.filePathCallback = filePath
 
@@ -298,26 +303,30 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPermissionRequest(
-                request: PermissionRequest
+                request: PermissionRequest?
             ) {
+                if (request == null) return
+
                 runOnUiThread {
                     handleWebPermissionRequest(request)
                 }
             }
 
             override fun onPermissionRequestCanceled(
-                request: PermissionRequest
+                request: PermissionRequest?
             ) {
-                if (pendingWebPermissionRequest === request) {
+                if (request != null && pendingWebPermissionRequest === request) {
                     pendingWebPermissionRequest = null
                     pendingPermissionFlow = PermissionFlow.NONE
                 }
             }
 
             override fun onGeolocationPermissionsShowPrompt(
-                origin: String,
-                callback: GeolocationPermissions.Callback
+                origin: String?,
+                callback: GeolocationPermissions.Callback?
             ) {
+                if (origin == null || callback == null) return
+
                 runOnUiThread {
                     handleGeolocationRequest(
                         origin,
@@ -1119,6 +1128,11 @@ class MainActivity : ComponentActivity() {
         } catch (_: IllegalArgumentException) {
             // Already unregistered.
         }
+    }
+
+    private fun registerConnectivityReceiver() {
+        val filter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
+        registerReceiver(connectivityReceiver, filter)
     }
 
     override fun onDestroy() {

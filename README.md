@@ -190,4 +190,4 @@ if [ "$BYTES" -gt 409600 ]; then exit 1; fi
 
 ## Codemagic
 
-`codemagic.yaml` is at the repository root. The workflow is `looply-android-debug`, uses `mac_mini_m2`, caches Gradle, builds `assembleDebug --stacktrace`, checks the 400 KiB limit and publishes the resulting APK as a Codemagic artifact.
+`codemagic.yaml` is at the repository root. The workflow is `looply-android-debug`, uses `mac_mini_m2`, caches Gradle, builds `assembleDebug --stacktrace`, checks the 400 KiB limit and publishes the resulting APK as a Codemagic artifact. 

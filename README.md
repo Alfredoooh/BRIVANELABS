@@ -191,3 +191,8 @@ if [ "$BYTES" -gt 409600 ]; then exit 1; fi
 ## Codemagic
 
 `codemagic.yaml` is at the repository root. The workflow is `app-ao-android-debug`, uses `mac_mini_m2`, caches Gradle, builds `assembleDebug --stacktrace`, checks the 400 KiB limit and publishes the resulting APK as a Codemagic artifact. 
+
+Icon update: legacy launcher artwork reduced to 76%; adaptive foreground is 108x108 with the logo inside the official 66dp safe zone.
+
+
+Icon update: legacy launcher artwork reduced to 76%; adaptive foreground is 108x108 with the logo inside the official 66dp safe zone.

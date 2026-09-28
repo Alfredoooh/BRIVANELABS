@@ -1,117 +1,58 @@
 #!/bin/sh
 set -eu
 
-# Generate app ao launcher and Android 12+ splash assets from one source image.
-#
-# IMPORTANT:
-# - Launcher icons KEEP the supplied image's original background and colors.
-# - Only the splash icon gets its outer background removed.
-# - The splash artwork is intentionally padded so the entire symbol remains
-#   visible and appears smaller on Android 12+ system splash screens.
+# Generate app ao launcher assets with Android-safe sizing.
+# Legacy icons use a 76% artwork scale on a white field.
+# Adaptive foreground uses a transparent logo inside Android's 66dp safe zone
+# of the 108dp adaptive-icon canvas.
 
 if [ "$#" -ne 1 ]; then
-    echo "Usage: $0 /path/to/icon_512x512_under_10kb.webp" >&2
+    echo "Usage: $0 /path/to/source.png" >&2
     exit 1
 fi
-
 SRC="$1"
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
 RES="$ROOT/app/src/main/res"
+[ -f "$SRC" ] || { echo "ERROR: source image not found: $SRC" >&2; exit 1; }
 
-if [ ! -f "$SRC" ]; then
-    echo "ERROR: source image not found: $SRC" >&2
-    exit 1
-fi
-
-mkdir -p \
-    "$RES/mipmap-mdpi" \
-    "$RES/mipmap-hdpi" \
-    "$RES/mipmap-xhdpi" \
-    "$RES/mipmap-xxhdpi" \
-    "$RES/mipmap-xxxhdpi" \
-    "$RES/drawable"
-
-# Launcher icon: preserve the original supplied background exactly.
-magick "$SRC" \
-    -resize '48x48!' \
-    -strip \
-    -depth 8 \
-    -define png:compression-level=9 \
-    "$RES/mipmap-mdpi/ic_launcher.png"
-
-magick "$SRC" \
-    -resize '72x72!' \
-    -strip \
-    -depth 8 \
-    -define png:compression-level=9 \
-    "$RES/mipmap-hdpi/ic_launcher.png"
-
-magick "$SRC" \
-    -resize '96x96!' \
-    -strip \
-    -depth 8 \
-    -define png:compression-level=9 \
-    "$RES/mipmap-xhdpi/ic_launcher.png"
-
-magick "$SRC" \
-    -resize '144x144!' \
-    -strip \
-    -depth 8 \
-    -define png:compression-level=9 \
-    "$RES/mipmap-xxhdpi/ic_launcher.png"
-
-magick "$SRC" \
-    -resize '192x192!' \
-    -strip \
-    -depth 8 \
-    -define png:compression-level=9 \
-    "$RES/mipmap-xxxhdpi/ic_launcher.png"
-
-TMP_CUTOUT="$(mktemp -t app-ao-cutout).png"
-TMP_SPLASH="$(mktemp -t app-ao-splash).png"
-trap 'rm -f "$TMP_CUTOUT" "$TMP_SPLASH"' EXIT
-
-# Remove only the CONNECTED outer background. Interior dark areas of the symbol
-# are deliberately preserved as part of the artwork.
-magick "$SRC" \
-    -alpha on \
-    -fuzz 8% \
-    -fill none \
-    -draw 'color 0,0 floodfill' \
-    -trim +repage \
-    -depth 8 \
-    -strip \
-    "$TMP_CUTOUT"
-
-# 192x192 transparent canvas with the visible artwork limited to about 96px.
-# This padding makes Android's splash icon visibly smaller while keeping every
-# part of the symbol inside the safe area.
-magick -size 192x192 xc:none \
-    "$TMP_CUTOUT" \
-    -resize '96x96' \
-    -gravity center \
-    -composite \
-    -depth 8 \
-    -strip \
-    -define png:color-type=6 \
-    -define png:compression-level=9 \
-    "$TMP_SPLASH"
-
-# The command above may optimize away transparent canvas dimensions on some
-# ImageMagick builds, so normalize it to a fixed 192x192 RGBA canvas.
-python3 - "$TMP_SPLASH" "$RES/drawable/splash_icon.png" <<'PY'
+python3 - "$SRC" "$RES" <<'PYTHON'
 import sys
+from pathlib import Path
 from PIL import Image
+import numpy as np
 
-source = Image.open(sys.argv[1]).convert("RGBA")
-canvas = Image.new("RGBA", (192, 192), (0, 0, 0, 0))
-source.thumbnail((96, 96), Image.Resampling.LANCZOS)
-canvas.alpha_composite(
-    source,
-    ((192 - source.width) // 2, (192 - source.height) // 2)
-)
-canvas.save(sys.argv[2], optimize=True)
-PY
+src=Path(sys.argv[1]); res=Path(sys.argv[2])
+img=Image.open(src).convert('RGB')
+side=min(img.size)
+img=img.crop(((img.width-side)//2,(img.height-side)//2,(img.width+side)//2,(img.height+side)//2)).resize((512,512),Image.Resampling.LANCZOS)
+a=np.array(img).astype(np.int16)
+d=np.sqrt(((255-a)**2).sum(axis=2))
+alpha=np.clip((d-3)/(24-3)*255,0,255).astype(np.uint8)
+logo=Image.fromarray(np.dstack([a.astype(np.uint8),alpha]),'RGBA')
+logo=logo.crop(logo.getchannel('A').getbbox())
 
-echo "Generated launcher icons with original background."
-echo "Generated transparent, padded 192x192 splash icon."
+def save(im,p):
+    Path(p).parent.mkdir(parents=True,exist_ok=True)
+    im.save(p,'PNG',optimize=True,compress_level=9)
+
+for den,size in [('ldpi',36),('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
+    c=Image.new('RGB',(size,size),'white')
+    art=logo.resize((round(size*.76),round(size*.76)),Image.Resampling.LANCZOS)
+    c.paste(art,((size-art.width)//2,(size-art.height)//2),art.getchannel('A'))
+    save(c,res/f'mipmap-{den}/ic_launcher.png')
+    save(c,res/f'mipmap-{den}/ic_launcher_round.png')
+
+fg=Image.new('RGBA',(108,108),(0,0,0,0))
+art=logo.resize((60,60),Image.Resampling.LANCZOS)
+fg.alpha_composite(art,(24,24))
+save(fg,res/'drawable-nodpi/ic_launcher_foreground.png')
+Path(res/'drawable-nodpi/ic_launcher_background.xml').write_text('<?xml version="1.0" encoding="utf-8"?>\n<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">\n    <solid android:color="#FFFFFF" />\n</shape>\n')
+adaptive='<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n    <background android:drawable="@drawable/ic_launcher_background" />\n    <foreground android:drawable="@drawable/ic_launcher_foreground" />\n</adaptive-icon>\n'
+for n in ('ic_launcher.xml','ic_launcher_round.xml'):
+    Path(res/f'mipmap-anydpi-v26/{n}').write_text(adaptive)
+
+s=Image.new('RGBA',(192,192),(0,0,0,0))
+art=logo.resize((92,92),Image.Resampling.LANCZOS)
+s.alpha_composite(art,(50,50))
+save(s,res/'drawable/splash_icon.png')
+PYTHON

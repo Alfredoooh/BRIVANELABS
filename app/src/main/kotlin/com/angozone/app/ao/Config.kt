@@ -1,7 +1,7 @@
 package com.angozone.app.ao
 
 object Config {
-    const val TARGET_URL = "https://nexa-web-payments.onrender.com/"
+    const val TARGET_URL = "https://angozoneappao.onrender.com/"
 
     const val DEFAULT_STATUS_BAR_COLOR = "#121212"
     const val DEFAULT_NAVIGATION_BAR_COLOR = "#121212"

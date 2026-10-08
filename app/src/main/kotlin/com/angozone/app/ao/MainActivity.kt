@@ -9,8 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.net.ConnectivityManager
@@ -21,9 +19,7 @@ import android.os.Environment
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.MediaStore
-import android.view.View
 import android.view.ViewGroup
-import android.view.animation.AccelerateDecelerateInterpolator
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
@@ -34,8 +30,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
@@ -58,7 +52,6 @@ import java.util.Locale
  */
 class MainActivity : ComponentActivity() {
 
-    private lateinit var rootContainer: FrameLayout
     private lateinit var webView: WebView
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
     private lateinit var permissionLauncher: ActivityResultLauncher<Array<String>>
@@ -66,20 +59,6 @@ class MainActivity : ComponentActivity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private var cameraOutputUri: Uri? = null
     private var cameraOutputFile: File? = null
-
-    private enum class NavigationDirection {
-        FORWARD,
-        BACKWARD
-    }
-
-    private var navigationDirection: NavigationDirection? = null
-    private var navigationTransitionRunning = false
-    private var transitionSnapshotView: ImageView? = null
-    private var transitionSnapshotBitmap: Bitmap? = null
-    private var suppressedUrlOverride: String? = null
-
-    private val navigationInterpolator = AccelerateDecelerateInterpolator()
-    private val navigationDuration = 240L
 
     private var lastLoadHadError = false
 
@@ -136,15 +115,7 @@ class MainActivity : ComponentActivity() {
         configureWebView()
         registerConnectivityReceiver()
 
-        rootContainer = FrameLayout(this).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-        }
-        rootContainer.addView(webView)
-
-        setContentView(rootContainer)
+        setContentView(webView)
         webView.loadUrl(Config.TARGET_URL)
     }
 
@@ -223,21 +194,8 @@ class MainActivity : ComponentActivity() {
             this,
             object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {
-                    if (!::webView.isInitialized) {
-                        finish()
-                        return
-                    }
-
-                    if (navigationTransitionRunning) {
-                        return
-                    }
-
-                    if (webView.canGoBack()) {
-                        beginNativeSlideNavigation(
-                            direction = NavigationDirection.BACKWARD
-                        ) {
-                            webView.goBack()
-                        }
+                    if (::webView.isInitialized && webView.canGoBack()) {
+                        webView.goBack()
                     } else {
                         finish()
                     }
@@ -301,35 +259,8 @@ class MainActivity : ComponentActivity() {
                 view: WebView?,
                 request: WebResourceRequest?
             ): Boolean {
-                if (request?.isForMainFrame != true) {
-                    return false
-                }
-
-                val uri = request.url ?: return false
-
-                if (navigationTransitionRunning && request.isRedirect) {
-                    return false
-                }
-
-                suppressedUrlOverride?.let { suppressed ->
-                    if (suppressed == uri.toString()) {
-                        suppressedUrlOverride = null
-                        return false
-                    }
-                }
-
+                val uri = request?.url ?: return false
                 return routeUrl(uri)
-            }
-
-            override fun onPageCommitVisible(
-                view: WebView?,
-                url: String?
-            ) {
-                super.onPageCommitVisible(view, url)
-
-                if (navigationDirection != null) {
-                    completeNativeSlideNavigation()
-                }
             }
 
             override fun onReceivedError(
@@ -339,10 +270,6 @@ class MainActivity : ComponentActivity() {
             ) {
                 if (request?.isForMainFrame == true) {
                     lastLoadHadError = true
-
-                    if (navigationTransitionRunning) {
-                        cancelNativeSlideNavigation()
-                    }
                 }
             }
         }
@@ -414,17 +341,17 @@ class MainActivity : ComponentActivity() {
         val scheme = uri.scheme?.lowercase(Locale.US)
 
         if (scheme == "http" || scheme == "https") {
-            if (navigationTransitionRunning) {
-                return true
-            }
+            val targetHost = Uri.parse(Config.TARGET_URL).host
+            val requestedHost = uri.host
 
-            return beginNativeSlideNavigation(
-                direction = NavigationDirection.FORWARD,
-                loadAction = {
-                    suppressedUrlOverride = uri.toString()
-                    webView.loadUrl(uri.toString())
-                }
-            )
+            val sameHost =
+                targetHost != null &&
+                    requestedHost != null &&
+                    targetHost.equals(requestedHost, true)
+
+            if (sameHost) {
+                return false
+            }
         }
 
         if (scheme == "about" || scheme == "file") {
@@ -447,188 +374,6 @@ class MainActivity : ComponentActivity() {
             ).show()
             true
         }
-    }
-
-    /**
-     * Performs a real page-to-page native-looking slide without replacing the
-     * WebView or Activity. The current WebView is captured into an ImageView
-     * snapshot, the new page loads underneath it, and both surfaces slide in
-     * opposite directions when the new page becomes visible. This keeps the
-     * WebView history, cookies, JS state and file/permission flows intact.
-     */
-    private fun beginNativeSlideNavigation(
-        direction: NavigationDirection,
-        loadAction: () -> Unit
-    ): Boolean {
-        if (navigationTransitionRunning) {
-            return true
-        }
-
-        if (!::rootContainer.isInitialized || !::webView.isInitialized) {
-            loadAction()
-            return false
-        }
-
-        val width = webView.width
-
-        if (width <= 0 || webView.height <= 0) {
-            loadAction()
-            return false
-        }
-
-        val snapshot = try {
-            Bitmap.createBitmap(
-                webView.width,
-                webView.height,
-                Bitmap.Config.ARGB_8888
-            ).also { bitmap ->
-                Canvas(bitmap).also { canvas ->
-                    webView.draw(canvas)
-                }
-            }
-        } catch (_: Throwable) {
-            loadAction()
-            return false
-        }
-
-        val snapshotView = ImageView(this).apply {
-            setImageBitmap(snapshot)
-            scaleType = ImageView.ScaleType.FIT_XY
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            isClickable = true
-        }
-
-        transitionSnapshotBitmap = snapshot
-        transitionSnapshotView = snapshotView
-        navigationDirection = direction
-        navigationTransitionRunning = true
-
-        webView.animate().cancel()
-        webView.translationX =
-            if (direction == NavigationDirection.FORWARD) {
-                width.toFloat()
-            } else {
-                -width.toFloat()
-            }
-
-        rootContainer.addView(snapshotView)
-        snapshotView.bringToFront()
-
-        try {
-            loadAction()
-        } catch (_: Throwable) {
-            cancelNativeSlideNavigation()
-            return false
-        }
-
-        return true
-    }
-
-    private fun completeNativeSlideNavigation() {
-        val direction = navigationDirection ?: return
-        val snapshotView = transitionSnapshotView ?: return
-
-        if (!navigationTransitionRunning) {
-            return
-        }
-
-        val width = webView.width.toFloat()
-
-        if (width <= 0f) {
-            resetNativeSlideNavigation()
-            return
-        }
-
-        val snapshotEnd =
-            if (direction == NavigationDirection.FORWARD) {
-                -width
-            } else {
-                width
-            }
-
-        webView.animate()
-            .translationX(0f)
-            .setDuration(navigationDuration)
-            .setInterpolator(navigationInterpolator)
-            .withLayer()
-            .start()
-
-        snapshotView.animate()
-            .translationX(snapshotEnd)
-            .setDuration(navigationDuration)
-            .setInterpolator(navigationInterpolator)
-            .withLayer()
-            .withEndAction {
-                finishNativeSlideNavigation()
-            }
-            .start()
-    }
-
-    private fun cancelNativeSlideNavigation() {
-        if (!navigationTransitionRunning) {
-            return
-        }
-
-        val snapshotView = transitionSnapshotView
-            ?: run {
-                resetNativeSlideNavigation()
-                return
-            }
-
-        webView.animate().cancel()
-        snapshotView.animate().cancel()
-
-        webView.translationX = 0f
-        snapshotView.translationX = 0f
-
-        snapshotView.animate()
-            .alpha(0f)
-            .setDuration(120L)
-            .setInterpolator(navigationInterpolator)
-            .withEndAction {
-                resetNativeSlideNavigation()
-            }
-            .start()
-    }
-
-    private fun finishNativeSlideNavigation() {
-        transitionSnapshotView?.let { snapshotView ->
-            rootContainer.removeView(snapshotView)
-            snapshotView.setImageDrawable(null)
-        }
-
-        webView.animate().cancel()
-        webView.translationX = 0f
-        resetNativeSlideStateOnly()
-    }
-
-    private fun resetNativeSlideNavigation() {
-        transitionSnapshotView?.let { snapshotView ->
-            rootContainer.removeView(snapshotView)
-            snapshotView.setImageDrawable(null)
-        }
-
-        webView.animate().cancel()
-        webView.translationX = 0f
-        resetNativeSlideStateOnly()
-    }
-
-    private fun resetNativeSlideStateOnly() {
-        transitionSnapshotBitmap?.let { bitmap ->
-            if (!bitmap.isRecycled) {
-                bitmap.recycle()
-            }
-        }
-
-        transitionSnapshotBitmap = null
-        transitionSnapshotView = null
-        navigationDirection = null
-        navigationTransitionRunning = false
-        suppressedUrlOverride = null
     }
 
     private fun createFileChooserIntent(
